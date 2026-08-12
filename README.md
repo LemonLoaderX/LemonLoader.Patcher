@@ -1,20 +1,29 @@
 # LemonLoader.Patcher
 
-This repository owns the build-time managed assembly transformations required by
-the current Android LemonLoader dependency stack. It is separate from the loader
-runtime and has no device or APK responsibilities.
+Cross-platform Android IL2CPP patching application for Windows and Linux. It
+provides a CLI and an Avalonia desktop GUI over the same patch pipeline.
 
-The command accepts one managed dependency assembly, or
-`--interop-directory <path>`. Every transformation is guarded by the exact
-assembly identity and expected IL shape and fails closed on unknown input.
+The patcher reads the APK as ZIP data; apktool is not required. It can extract
+`libil2cpp.so`, `global-metadata.dat`, and the Unity version directly from a
+standard ARM64 Unity APK, generate game-specific Interop assemblies, merge a
+game-independent LemonLoader Release, add Mod DLLs, align native entries, and
+sign the result.
 
-```text
-dotnet run --project AndroidManagedCompatPatcher.csproj -- \
-  --runtime-major 10 path/to/0Harmony.dll
+```powershell
+dotnet run --project src/LemonLoader.Patcher -- patch `
+  --apk game.apk `
+  --release LemonLoader-Android-arm64.zip `
+  --output game-lemon.apk `
+  --interop-output GeneratedInterop `
+  --mod ExampleMod.dll `
+  --align
 ```
 
-The project is framework-dependent and portable across Windows, Linux, and
-macOS hosts with .NET SDK 10. It must not declare a host RuntimeIdentifier.
+Omit `--release` to download
+`LemonLoader-Android-arm64.zip` from the latest LemonLoader GitHub release.
+`--libil2cpp`, `--metadata`, and `--unity-version` override APK discovery.
+Signing is enabled when `--keystore`, `--ks-pass`, and `--ks-alias` are supplied.
 
-Run `./scripts/test.ps1` for the guarded transform and idempotence regression
-suite.
+`LemonLoader.ManagedCompat` remains the separate build-time transformer for the
+pinned Harmony/MonoMod/Il2CppInterop runtime dependencies. Run
+`./scripts/test.ps1` for its guarded transform regression suite.

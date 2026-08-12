@@ -38,7 +38,7 @@ foreach ($fixture in $fixtures.GetEnumerator()) {
     }
 }
 
-$patcherProject = Join-Path $repositoryRoot "AndroidManagedCompatPatcher.csproj"
+$patcherProject = Join-Path $repositoryRoot "src\LemonLoader.ManagedCompat\LemonLoader.ManagedCompat.csproj"
 
 $net8TestRoot = Join-Path $testRoot "Net8"
 New-Item -ItemType Directory -Force -Path $net8TestRoot | Out-Null

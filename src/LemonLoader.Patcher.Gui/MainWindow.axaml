@@ -1,0 +1,32 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LemonLoader.Patcher.Gui.MainWindow"
+        Title="LemonLoader Patcher" Width="820" Height="720" MinWidth="680" MinHeight="560">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="24">
+    <StackPanel Spacing="4">
+      <TextBlock Text="LemonLoader Patcher" FontSize="26" FontWeight="SemiBold" />
+      <TextBlock Text="Build a game-specific IL2CPP APK without decoding it." Opacity="0.72" />
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" Margin="0,24,0,20">
+      <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+        <TextBlock Text="Original APK" VerticalAlignment="Center"/><TextBox x:Name="ApkPath" Grid.Column="1" Watermark="game.apk"/>
+        <TextBlock Grid.Row="1" Text="Lemon Release" VerticalAlignment="Center"/><TextBox x:Name="ReleasePath" Grid.Row="1" Grid.Column="1" Watermark="Optional; latest is downloaded when empty"/>
+        <TextBlock Grid.Row="2" Text="Output APK" VerticalAlignment="Center"/><TextBox x:Name="OutputPath" Grid.Row="2" Grid.Column="1" Watermark="game-lemon.apk"/>
+        <TextBlock Grid.Row="3" Text="libil2cpp.so" VerticalAlignment="Center"/><TextBox x:Name="LibIl2CppPath" Grid.Row="3" Grid.Column="1" Watermark="Optional APK override"/>
+        <TextBlock Grid.Row="4" Text="Metadata" VerticalAlignment="Center"/><TextBox x:Name="MetadataPath" Grid.Row="4" Grid.Column="1" Watermark="Optional global-metadata.dat override"/>
+        <TextBlock Grid.Row="5" Text="Unity version" VerticalAlignment="Center"/><TextBox x:Name="UnityVersion" Grid.Row="5" Grid.Column="1" Watermark="Optional; auto-detected"/>
+        <TextBlock Grid.Row="6" Text="Interop output" VerticalAlignment="Center"/><TextBox x:Name="InteropOutput" Grid.Row="6" Grid.Column="1" Watermark="Optional developer output directory"/>
+        <TextBlock Grid.Row="7" Text="Mod DLLs" VerticalAlignment="Center"/><TextBox x:Name="ModPaths" Grid.Row="7" Grid.Column="1" Watermark="Optional; separate multiple paths with ;"/>
+        <TextBlock Grid.Row="8" Text="Android SDK" VerticalAlignment="Center"/><TextBox x:Name="AndroidSdk" Grid.Row="8" Grid.Column="1" Watermark="Required for alignment/signing"/>
+        <TextBlock Grid.Row="9" Text="Keystore" VerticalAlignment="Center"/><TextBox x:Name="Keystore" Grid.Row="9" Grid.Column="1" Watermark="Optional; enables signing"/>
+        <TextBlock Grid.Row="10" Text="Key alias" VerticalAlignment="Center"/><TextBox x:Name="KeyAlias" Grid.Row="10" Grid.Column="1"/>
+        <TextBlock Grid.Row="11" Text="Store password" VerticalAlignment="Center"/><TextBox x:Name="StorePassword" Grid.Row="11" Grid.Column="1" PasswordChar="●"/>
+        <CheckBox x:Name="Align" Grid.Row="12" Grid.Column="1" Content="Align native libraries for 16 KiB pages" IsChecked="True"/>
+      </Grid>
+    </ScrollViewer>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+      <TextBlock x:Name="Status" Text="Ready" VerticalAlignment="Center" TextWrapping="Wrap"/>
+      <Button Grid.Column="1" Content="Build APK" Padding="22,10" Click="PatchClick"/>
+    </Grid>
+  </Grid>
+</Window>

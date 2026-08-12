@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "il2cppinterop.cli": {
+      "version": "1.5.1-ci.845",
+      "commands": [ "il2cppinterop" ]
+    }
+  }
+}
