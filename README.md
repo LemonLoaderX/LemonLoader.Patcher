@@ -15,3 +15,6 @@ dotnet run --project AndroidManagedCompatPatcher.csproj -- \
 
 The project is framework-dependent and portable across Windows, Linux, and
 macOS hosts with .NET SDK 10. It must not declare a host RuntimeIdentifier.
+
+Run `./scripts/test.ps1` for the guarded transform and idempotence regression
+suite.
