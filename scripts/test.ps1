@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $testRoot = [System.IO.Path]::GetFullPath(
-    (Join-Path $repositoryRoot "Output\AndroidManagedCompatPatcherTests"))
+    (Join-Path $repositoryRoot "Output\ManagedCompatTests"))
 $expectedPrefix = [System.IO.Path]::GetFullPath(
     (Join-Path $repositoryRoot "Output")).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
@@ -163,4 +163,10 @@ if ($normalizedAgainHash -ne $normalizedHash) {
     throw "The interop metadata idempotence pass changed the fixture a second time."
 }
 
-Write-Host "Android managed compatibility patcher tests passed for .NET 8 and .NET 10 dependency transforms and one malformed interop fixture."
+Write-Host "LemonLoader.ManagedCompat tests passed for .NET 8 and .NET 10 dependency transforms and one malformed interop fixture."
+
+$patcherTests = Join-Path $repositoryRoot "tests\LemonLoader.Patcher.Tests\LemonLoader.Patcher.Tests.csproj"
+dotnet run --project $patcherTests --configuration $Configuration
+if ($LASTEXITCODE -ne 0) {
+    throw "The LemonLoader.Patcher regression tests failed with exit code $LASTEXITCODE."
+}

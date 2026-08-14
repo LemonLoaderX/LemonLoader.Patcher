@@ -32,7 +32,7 @@ if (positionalArguments.Count == 2 && positionalArguments[0] == "--interop-direc
 if (positionalArguments.Count != 1)
 {
     Console.Error.WriteLine(
-        "Usage: AndroidManagedCompatPatcher [--runtime-major <version>] <managed-assembly.dll> | --interop-directory <directory>");
+        "Usage: LemonLoader.ManagedCompat [--runtime-major <version>] <managed-assembly.dll> | --interop-directory <directory>");
     return 2;
 }
 
@@ -84,9 +84,9 @@ if (assembly.Name.Name == "Il2CppInterop.Runtime")
         }
     }
 
-    if (androidNameReplacements == 0 && androidModuleReferences == 2)
+    if (androidModuleReferences == 2 && androidNameReplacements is 0 or 2)
     {
-        Console.WriteLine($"Il2CppInterop.Runtime is already patched: {assemblyPath}");
+        Console.WriteLine($"Il2CppInterop.Runtime already supports Android libil2cpp.so discovery: {assemblyPath}");
         return 0;
     }
 
@@ -247,6 +247,7 @@ static void WriteAssembly(AssemblyDefinition assembly, string assemblyPath)
     var temporaryPath = assemblyPath + ".patched";
     File.Delete(temporaryPath);
     assembly.Write(temporaryPath, new WriterParameters { WriteSymbols = false });
+    assembly.Dispose();
     File.Move(temporaryPath, assemblyPath, true);
 }
 
@@ -270,15 +271,16 @@ static int NormalizeInteropDirectory(string directoryPath)
 
     var changedAssemblies = 0;
     var normalizedParameters = 0;
-    using var resolver = new DefaultAssemblyResolver();
-    resolver.AddSearchDirectory(fullDirectoryPath);
     foreach (var path in assemblyPaths)
     {
+        using var resolver = new DefaultAssemblyResolver();
+        resolver.AddSearchDirectory(fullDirectoryPath);
         using var assembly = AssemblyDefinition.ReadAssembly(path, new ReaderParameters
         {
             AssemblyResolver = resolver,
             InMemory = true,
-            ReadSymbols = false
+            ReadSymbols = false,
+            ReadingMode = ReadingMode.Immediate
         });
 
         var changes = 0;

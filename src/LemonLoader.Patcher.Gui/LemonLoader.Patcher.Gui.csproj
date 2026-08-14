@@ -10,6 +10,7 @@
     <PackageReference Include="Avalonia" Version="11.3.20" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
-    <ProjectReference Include="../LemonLoader.Patcher/LemonLoader.Patcher.csproj" />
+    <ProjectReference Include="../LemonLoader.Patcher/LemonLoader.Patcher.csproj"
+                      GlobalPropertiesToRemove="PublishSingleFile;SelfContained" />
   </ItemGroup>
 </Project>
