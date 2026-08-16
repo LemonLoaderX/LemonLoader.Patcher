@@ -46,6 +46,13 @@ internal static class UnityDependenciesResolver
         string cacheRoot,
         string unityVersion,
         CancellationToken cancellationToken = default)
+        => await ResolveAsync(cacheRoot, unityVersion, null, cancellationToken);
+
+    public static async Task<UnityDependenciesResolution> ResolveAsync(
+        string cacheRoot,
+        string unityVersion,
+        IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken = default)
     {
         using var client = new HttpClient { Timeout = DownloadTimeout };
         client.DefaultRequestHeaders.UserAgent.Add(
@@ -55,6 +62,7 @@ internal static class UnityDependenciesResolver
             unityVersion,
             client,
             DefaultSources,
+            progress,
             cancellationToken);
     }
 
@@ -63,6 +71,21 @@ internal static class UnityDependenciesResolver
         string unityVersion,
         HttpClient client,
         IReadOnlyList<UnityDependencySource> sources,
+        CancellationToken cancellationToken)
+        => await ResolveAsync(
+            cacheRoot,
+            unityVersion,
+            client,
+            sources,
+            null,
+            cancellationToken);
+
+    internal static async Task<UnityDependenciesResolution> ResolveAsync(
+        string cacheRoot,
+        string unityVersion,
+        HttpClient client,
+        IReadOnlyList<UnityDependencySource> sources,
+        IProgress<PatcherMessage>? progress,
         CancellationToken cancellationToken)
     {
         if (sources.Count == 0)
@@ -80,7 +103,9 @@ internal static class UnityDependenciesResolver
                 packageVersion,
                 out var cachedResolution))
         {
-            Console.WriteLine($"Using cached Unity base libraries: {destination}");
+            progress?.Report(new(
+                PatcherMessageKind.Stage,
+                $"Using cached Unity dependencies: {destination}"));
             return cachedResolution;
         }
 
@@ -95,32 +120,27 @@ internal static class UnityDependenciesResolver
             var archivePath = GetOwnedPath(
                 root,
                 $"Managed-{packageVersion}-{SanitizeFileName(source.Name)}.zip");
-            var legacyArchivePath = source == DefaultSources[0]
-                ? GetOwnedPath(root, $"Managed-{packageVersion}.zip")
-                : null;
-
-            foreach (var cachedArchive in new[] { archivePath, legacyArchivePath }
-                         .Where(path => path is not null && File.Exists(path))
-                         .Cast<string>())
+            if (File.Exists(archivePath))
             {
                 try
                 {
                     var cachedArchiveResolution = ExtractAndPublish(
-                        cachedArchive,
+                        archivePath,
                         destination,
                         requestedVersion,
                         packageVersion,
                         source);
-                    Console.WriteLine(
-                        $"Restored Unity base libraries {packageVersion} from cached archive: {destination}");
+                    progress?.Report(new(
+                        PatcherMessageKind.Stage,
+                        $"Restored Unity dependencies {packageVersion} from cache"));
                     return cachedArchiveResolution;
                 }
                 catch (Exception exception) when (exception is InvalidDataException or IOException)
                 {
                     failures.Add(new InvalidDataException(
-                        $"Cached Unity dependency archive '{cachedArchive}' is invalid and will be replaced.",
+                        $"Cached Unity dependency archive '{archivePath}' is invalid and will be replaced.",
                         exception));
-                    File.Delete(cachedArchive);
+                    File.Delete(archivePath);
                 }
             }
 
@@ -129,7 +149,9 @@ internal static class UnityDependenciesResolver
                 $".Managed-{packageVersion}-{Guid.NewGuid():N}.download");
             try
             {
-                Console.WriteLine($"Downloading Unity base libraries {packageVersion} from {source.Name}...");
+                progress?.Report(new(
+                    PatcherMessageKind.Stage,
+                    $"Downloading Unity dependencies {packageVersion} from {source.Name}"));
                 using var response = await client.GetAsync(
                     sourceUri,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -164,8 +186,9 @@ internal static class UnityDependenciesResolver
                     packageVersion,
                     source);
                 File.Move(temporaryArchive, archivePath, true);
-                Console.WriteLine(
-                    $"Restored {resolution.AssemblyCount} Unity base libraries for {packageVersion}: {destination}");
+                progress?.Report(new(
+                    PatcherMessageKind.Stage,
+                    $"Restored {resolution.AssemblyCount} Unity assemblies for {packageVersion}"));
                 return resolution;
             }
             catch (OperationCanceledException)

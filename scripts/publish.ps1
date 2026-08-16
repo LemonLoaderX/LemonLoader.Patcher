@@ -19,13 +19,13 @@ if ([string]::IsNullOrWhiteSpace($LemonRelease)) {
 $LemonRelease = [System.IO.Path]::GetFullPath($LemonRelease)
 $projects = @(
     [pscustomobject]@{
-        Name = "cli"
-        Path = Join-Path $repositoryRoot "src\LemonLoader.Patcher\LemonLoader.Patcher.csproj"
+        Name = "CLI"
+        Path = Join-Path $repositoryRoot "src\LemonLoader.Patcher.CLI\LemonLoader.Patcher.CLI.csproj"
         SingleFile = $true
     },
     [pscustomobject]@{
-        Name = "gui"
-        Path = Join-Path $repositoryRoot "src\LemonLoader.Patcher.Gui\LemonLoader.Patcher.Gui.csproj"
+        Name = "GUI"
+        Path = Join-Path $repositoryRoot "src\LemonLoader.Patcher.GUI\LemonLoader.Patcher.GUI.csproj"
         SingleFile = $false
     }
 )
@@ -56,36 +56,37 @@ foreach ($runtimeIdentifier in $Runtime) {
     }
     New-Item -ItemType Directory -Force -Path $runtimeStaging | Out-Null
 
-    foreach ($project in $projects) {
-        $publishOutput = Join-Path $runtimeWorkRoot "build\$($project.Name)"
-        dotnet publish $project.Path `
-            --configuration $Configuration `
-            --runtime $runtimeIdentifier `
-            --output $publishOutput `
-            --no-self-contained `
-            -p:PublishSingleFile=$($project.SingleFile.ToString().ToLowerInvariant()) `
-            -p:DebugType=None `
-            -p:DebugSymbols=false
-        if ($LASTEXITCODE -ne 0) {
-            throw "Publishing $($project.Name) for $runtimeIdentifier failed with exit code $LASTEXITCODE."
+    try {
+        foreach ($project in $projects) {
+            $publishOutput = Join-Path $runtimeWorkRoot "build\$($project.Name)"
+            dotnet publish $project.Path `
+                --configuration $Configuration `
+                --runtime $runtimeIdentifier `
+                --output $publishOutput `
+                --no-self-contained `
+                -p:PublishSingleFile=$($project.SingleFile.ToString().ToLowerInvariant()) `
+                -p:DebugType=None `
+                -p:DebugSymbols=false
+            if ($LASTEXITCODE -ne 0) {
+                throw "Publishing $($project.Name) for $runtimeIdentifier failed with exit code $LASTEXITCODE."
+            }
+            Move-Item -LiteralPath $publishOutput `
+                -Destination (Join-Path $runtimeStaging $project.Name)
         }
-        Move-Item -LiteralPath $publishOutput `
-            -Destination (Join-Path $runtimeStaging $project.Name)
-    }
 
-    if (Test-Path -LiteralPath $LemonRelease -PathType Leaf) {
-        Copy-Item -LiteralPath $LemonRelease `
-            -Destination (Join-Path $runtimeStaging "LemonLoader-Android-arm64.zip") `
-            -Force
-    }
-    else {
-        Write-Warning "LemonLoader Release was not found at '$LemonRelease'. The published Patcher will require --release or a working online Release."
-    }
+        if (Test-Path -LiteralPath $LemonRelease -PathType Leaf) {
+            Copy-Item -LiteralPath $LemonRelease `
+                -Destination (Join-Path $runtimeStaging "LemonLoader-Android-arm64.zip") `
+                -Force
+        }
+        else {
+            Write-Warning "LemonLoader Release was not found at '$LemonRelease'. The published Patcher will require a local or downloadable Release."
+        }
 
     $cliExecutable = Join-Path $runtimeStaging `
-        "cli\LemonLoader.Patcher$(if ($runtimeIdentifier -eq 'win-x64') { '.exe' })"
+        "CLI\LemonLoader.Patcher.CLI$(if ($runtimeIdentifier -eq 'win-x64') { '.exe' })"
     $guiExecutable = Join-Path $runtimeStaging `
-        "gui\LemonLoader.Patcher.Gui$(if ($runtimeIdentifier -eq 'win-x64') { '.exe' })"
+        "GUI\LemonLoader.Patcher.GUI$(if ($runtimeIdentifier -eq 'win-x64') { '.exe' })"
     if (-not (Test-Path -LiteralPath $cliExecutable -PathType Leaf) -or
         -not (Test-Path -LiteralPath $guiExecutable -PathType Leaf)) {
         throw "Published CLI or GUI executable is missing for $runtimeIdentifier."
@@ -117,12 +118,12 @@ foreach ($runtimeIdentifier in $Runtime) {
         }
         throw "Could not publish '$runtimeOutput'; the previous output was restored. $($_.Exception.Message)"
     }
+        Write-Host "Published LemonLoader.Patcher for $runtimeIdentifier to:"
+        Write-Host "  $runtimeOutput"
+    }
     finally {
         if (Test-Path -LiteralPath $runtimeWorkRoot) {
             Remove-Item -LiteralPath $runtimeWorkRoot -Recurse -Force
         }
     }
-
-    Write-Host "Published LemonLoader.Patcher for $runtimeIdentifier to:"
-    Write-Host "  $runtimeOutput"
 }

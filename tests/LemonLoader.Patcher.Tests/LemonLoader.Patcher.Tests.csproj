@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/LemonLoader.Patcher/LemonLoader.Patcher.csproj" />
+    <ProjectReference Include="../../src/LemonLoader.Patcher.Core/LemonLoader.Patcher.Core.csproj" />
+    <ProjectReference Include="../../src/LemonLoader.Patcher.CLI/LemonLoader.Patcher.CLI.csproj" />
   </ItemGroup>
 </Project>

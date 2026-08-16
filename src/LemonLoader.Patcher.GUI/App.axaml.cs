@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
-namespace LemonLoader.Patcher.Gui;
+namespace LemonLoader.Patcher.GUI;
 
 public sealed partial class App : Application
 {

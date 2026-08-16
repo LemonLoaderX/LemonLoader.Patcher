@@ -1,141 +1,111 @@
-# LemonLoader.Patcher
+# LemonLoader Patcher
 
-Cross-platform Android IL2CPP patching application for Windows and Linux. It
-provides a CLI and an Avalonia desktop GUI over the same patch pipeline.
+Cross-platform CLI and Avalonia GUI for producing LemonLoader-enabled Android
+ARM64 IL2CPP APKs. Both front ends call the same typed patch pipeline; the GUI
+does not shell out to or emulate the CLI.
 
-The patcher reads the APK as ZIP data; apktool is not required. It can extract
-`libil2cpp.so`, `global-metadata.dat`, and the Unity version directly from a
-standard ARM64 Unity APK, generate game-specific Interop assemblies, merge a
-game-independent LemonLoader Release, add Mod DLLs, align native entries, and
-sign the result.
+The Patcher works directly with ZIP entries, generates game-specific Interop
+assemblies, restores the matching Unity managed references, merges the current
+LemonLoader Release and deployment tree, zipaligns the result for 16 KiB pages,
+and optionally signs it. Use an original game APK as input. An APK that already
+contains a loader payload is rejected rather than migrated.
+
+## CLI
 
 ```powershell
-dotnet run --project src/LemonLoader.Patcher -- patch `
-  --apk game.apk `
+dotnet run --project src/LemonLoader.Patcher.CLI -- patch game.apk `
+  --output game-lemonloader.apk `
   --release LemonLoader-Android-arm64.zip `
-  --output game-lemon.apk `
-  --interop-output GeneratedInterop `
   --deployment Deployment `
-  --mod ExampleMod.dll `
-  --plugin ExamplePlugin.dll `
-  --user-lib SharedLibrary.dll `
-  --user-data UserData `
-  --deployment-profile production `
-  --deployment-policy "UserData/Managed/**=refresh" `
-  --align
+  --profile production `
+  --policy "UserData/Managed/**=refresh" `
+  --sdk D:\Develop\Android\SDK
 ```
 
-Omit `--release` to download
-`LemonLoader-Android-arm64.zip` from the latest LemonLoader GitHub release.
-`--libil2cpp`, `--metadata`, and `--unity-version` override APK discovery.
-The Patcher downloads and caches the matching Unity managed libraries and uses
-them to restore stripped Unity API wrappers. `--unity-libs` can supply an
-offline directory containing `UnityEngine.CoreModule.dll` instead.
-Signing is enabled when `--keystore`, `--ks-pass`, and `--ks-alias` are supplied.
-
-Unity libraries are resolved from the Android IL2CPP packages published by
-`MelonLoader.UnityDependencies`, with `unity.bepinex.dev` as a fallback. A full
-Unity version such as `6000.3.8f1` maps to package `6000.3.8`. Downloads use a
-staging file, invalid caches are repaired, and the extracted DLL set is recorded
-in `lemonloader-unity-dependencies.json` with source and content hashes. Restore
-the same developer reference set without patching an APK with:
-
-```powershell
-dotnet run --project src/LemonLoader.Patcher -- unity-dependencies `
-  --unity-version 6000.3.8f1 `
-  --output UnityDependencies
-```
-
-Generated Interop output includes `interop-manifest.json`, which records the
-game inputs, tool versions, Unity dependency provenance, and every output hash.
-The manifest is also placed beside the Interop DLLs in the APK. Unstripping can
-restore managed wrappers and method bodies; it cannot create a native Unity
-implementation that the Android player does not contain.
-
-`LemonLoader.ManagedCompat` remains the separate build-time transformer for the
-pinned Harmony/MonoMod/Il2CppInterop runtime dependencies. Run
-`./scripts/test.ps1` for the guarded transform, Release validation, Unity cache,
-fallback, and output-publication regression suites. For a real generated pair,
-`scripts/verify-unstripping.ps1` compares stripped and unstripped output and can
-assert required Unity methods.
-
-## Desktop GUI
-
-The Avalonia GUI source is under `src/LemonLoader.Patcher.Gui`. During local
-development, launch it with:
-
-```powershell
-dotnet run --project src/LemonLoader.Patcher.Gui
-```
-
-Use `scripts/publish.ps1` on Windows or `scripts/publish.sh` on Linux to publish
-the CLI and GUI for both supported desktop platforms. The CLI is a single-file
-application; Avalonia's platform dependencies remain beside the GUI executable.
-Published executables are
-kept at stable paths instead of inside project-local `bin` directories:
+The deployment directory mirrors the runtime MelonLoader directory:
 
 ```text
-Output/Releases/win-x64/cli/LemonLoader.Patcher.exe
-Output/Releases/win-x64/gui/LemonLoader.Patcher.Gui.exe
-Output/Releases/linux-x64/cli/LemonLoader.Patcher
-Output/Releases/linux-x64/gui/LemonLoader.Patcher.Gui
+Deployment/
+  Mods/
+  Plugins/
+  UserLibs/
+  UserData/
 ```
 
-Pass one runtime to publish only that platform, for example
-`./scripts/publish.ps1 -Runtime win-x64` or `./scripts/publish.sh linux-x64`.
-The published applications require the .NET 10 desktop runtime, and Interop
-generation additionally requires a .NET SDK for the pinned tool restore.
+Future top-level directories are preserved. Standard directories must use the
+shown Android casing. `development` seeds missing files, `production` updates
+packaged code while preserving user-modified data, and `locked` enforces
+packaged code on every launch. Repeat `--policy path=policy` only for exceptions.
 
-The publish scripts also copy the workspace's current
-`LemonLoader-Android-arm64.zip` beside the platform's `cli` and `gui`
-directories. Both applications discover that bundled Release automatically.
-Use `-LemonRelease <path>` in PowerShell or set `LEMONLOADER_RELEASE=<path>` for
-the shell script to bundle a different build. Without a bundled or explicit
-Release, the Patcher falls back to the latest GitHub release download.
-Each runtime is assembled in a fresh staging directory, checked for generated
-`.cpp2il`, `.tools`, and `Il2CppAssemblies` directories, then replaces the stable
-output with rollback protection. Old game-specific files cannot survive a new
-publish.
+Every APK is zipaligned. The Android SDK is resolved from `--sdk`,
+`ANDROID_SDK_ROOT`, or `ANDROID_HOME`. Signing uses `--keystore` and
+`--key-alias`; passwords are read from `LEMONLOADER_KEYSTORE_PASSWORD` and the
+optional `LEMONLOADER_KEY_PASSWORD`, so they do not appear in the process list.
 
-The Release manifest is validated as patcher input but is not copied into an
-APK. APK payload merging is restricted to the Release `assets` and `lib` trees.
-The patcher requires asset layout v5 and `assets/LemonLoader/payload.json`, so an
-older Release is rejected instead of producing a mixed-layout APK. All runtime,
-Interop, and deployment inputs live under `assets/LemonLoader`; legacy
-`assets/dotnet`, `assets/MelonLoader`, and `assets/LemonLoader/Mods` entries are
-removed during migration.
+Progress and external tool output are written to stderr. Successful result
+fields are written to stdout:
 
-The payload keeps independent loader, dotnet, and Interop hashes. Updating
-`MelonLoader.dll` therefore republishes the loader-owned `net6` and
-`Dependencies` directories without re-extracting dotnet, Interop, `Latest.log`,
-or `Logs`. Desktop `runtime/loader/Documentation` content is rejected from both
-the Release and final APK.
+```text
+output: C:\build\game-lemonloader.apk
+sha256: <sha256>
+unity-version: 6000.3.8f1
+```
 
-The deployment tree mirrors the MelonLoader base directory. `--deployment`
-recursively merges an entire mirror, including arbitrary future top-level
-directories. `--mod`, `--plugin`, `--user-lib`, and `--user-data` are convenience
-inputs that merge files or directory contents into `Mods`, `Plugins`, `UserLibs`,
-and `UserData` respectively. For example, `--user-data UserData` can package
-`UserData/Fonts/font.ab`. On launch, the bootstrap copies each deployment file to
-the same relative runtime path.
-Deployment policy is selected by profile, not declared for every file. The
-`development` profile seeds only missing files. `production` refreshes Mods,
-Plugins, and UserLibs on a new packaged deployment while upgrading unchanged
-UserData. `locked` enforces packaged Mods, Plugins, and UserLibs on every launch.
-Use repeatable `--deployment-policy path=policy` or
-`--deployment-policy directory/**=policy` only for exceptions. Exact rules beat
-the longest matching directory rule, and unmatched rules are rejected. The
-Patcher expands the effective `seed`, `upgrade`, `refresh`, or `enforce` policy
-into each manifest file, so native startup has no profile-default ambiguity.
+Exit codes are `0` for success, `1` for an execution failure, `2` for invalid
+usage, and `130` for cancellation. Errors are concise by default; add
+`--verbose` for exception details.
 
-Duplicate targets, file/directory target conflicts, unsafe paths, and bootstrap-
-reserved directories are rejected instead of choosing one input silently. The
-Patcher recomputes independent runtime and deployment content hashes plus a
-deployment revision that also covers effective policies. See
-[the Android deployment design](../LemonLoader/docs/android/DEPLOYMENT.md) for
-ownership, obsolete-file, backup, and rollback semantics.
+Restore the same Unity reference set for a Mod project without patching an APK:
 
-Only `libmain.so` may replace an original APK native entry. The bootstrap links
-libc++ statically; OpenSSL is stored in the private .NET asset tree. An APK that
-already owns `libssl.so` or `libcrypto.so`, any other Release native collision,
-or duplicate ZIP entry names is rejected with an explicit error.
+```powershell
+dotnet run --project src/LemonLoader.Patcher.CLI -- unity-dependencies `
+  6000.3.8f1 --output UnityDependencies
+```
+
+The resolver first uses `MelonLoader.UnityDependencies`, then
+`unity.bepinex.dev`. Downloads and extracted assemblies are verified and
+recorded in `lemonloader-unity-dependencies.json`.
+
+## GUI
+
+The Avalonia project and assembly are named `LemonLoader.Patcher.GUI`:
+
+```powershell
+dotnet run --project src/LemonLoader.Patcher.GUI
+```
+
+The GUI exposes two workspaces: APK patching and Unity dependency restoration.
+Common inputs stay in the main form; Interop overrides and signing are grouped
+under advanced sections. Paths use native file and directory pickers, operations
+can be cancelled, and pipeline/tool output is shown in the task log.
+
+## Build and publish
+
+```powershell
+pwsh -NoProfile -File scripts/test.ps1
+pwsh -NoProfile -File scripts/publish.ps1 `
+  -Runtime win-x64 `
+  -LemonRelease ..\LemonLoader\Output\Releases\LemonLoader-Android-arm64.zip
+```
+
+Stable outputs use the same acronym casing as the products:
+
+```text
+Output/Releases/win-x64/CLI/LemonLoader.Patcher.CLI.exe
+Output/Releases/win-x64/GUI/LemonLoader.Patcher.GUI.exe
+Output/Releases/linux-x64/CLI/LemonLoader.Patcher.CLI
+Output/Releases/linux-x64/GUI/LemonLoader.Patcher.GUI
+```
+
+Publishing uses a fresh staging directory and atomically replaces the runtime
+output. A bundled `LemonLoader-Android-arm64.zip` is placed beside `CLI` and
+`GUI`; without it, the Patcher downloads the current Release. Generated game
+artifacts such as `.cpp2il`, `.tools`, and `Il2CppAssemblies` are rejected from
+published output.
+
+The current Release contract is asset layout v5 with
+`assets/LemonLoader/payload.json`. Runtime loader, dotnet, Interop, and packaged
+deployment content use independent hashes. `runtime/loader/Documentation` is
+not valid Android payload content. Native entry replacement is limited to
+`libmain.so`; private .NET native dependencies remain isolated from game-owned
+libraries.

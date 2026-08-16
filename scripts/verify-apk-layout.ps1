@@ -3,8 +3,6 @@ param(
     [Parameter(Mandatory)]
     [string]$ApkPath,
 
-    [string[]]$ExpectedMod = @(),
-
     [string[]]$ExpectedDeployment = @(),
 
     [ValidateSet("development", "production", "locked")]
@@ -21,15 +19,11 @@ $apk = [IO.Path]::GetFullPath($ApkPath)
 if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
     throw "APK was not found at '$apk'."
 }
-$expectedMods = @($ExpectedMod | ForEach-Object { $_ -split ',' } | Where-Object {
-    -not [string]::IsNullOrWhiteSpace($_)
-})
 $expectedDeploymentFiles = @(
     $ExpectedDeployment |
         ForEach-Object { $_ -split ',' } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         ForEach-Object { $_.Trim().Replace('\', '/') }
-    $expectedMods | ForEach-Object { "Mods/$([IO.Path]::GetFileName($_))" }
 )
 $expectedPolicies = @{}
 foreach ($rule in @(
@@ -144,14 +138,14 @@ try {
         throw "APK contains duplicate ZIP entry '$($duplicate.Name)'."
     }
 
-    $legacy = $archive.Entries | Where-Object {
+    $forbiddenEntry = $archive.Entries | Where-Object {
         $_.FullName -ceq "assets/lemonloader_asset_hash.txt" -or
         $_.FullName.StartsWith("assets/dotnet/", [StringComparison]::Ordinal) -or
         $_.FullName.StartsWith("assets/MelonLoader/", [StringComparison]::Ordinal) -or
         $_.FullName.StartsWith("assets/LemonLoader/Mods/", [StringComparison]::Ordinal)
     } | Select-Object -First 1
-    if ($null -ne $legacy) {
-        throw "APK contains legacy LemonLoader entry '$($legacy.FullName)'."
+    if ($null -ne $forbiddenEntry) {
+        throw "APK contains a forbidden loader entry '$($forbiddenEntry.FullName)'."
     }
 
     foreach ($required in @(

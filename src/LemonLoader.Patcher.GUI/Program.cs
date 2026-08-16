@@ -1,6 +1,6 @@
 using Avalonia;
 
-namespace LemonLoader.Patcher.Gui;
+namespace LemonLoader.Patcher.GUI;
 
 internal static class Program
 {

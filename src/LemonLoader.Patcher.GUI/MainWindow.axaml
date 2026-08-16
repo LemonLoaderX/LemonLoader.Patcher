@@ -1,0 +1,283 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="LemonLoader.Patcher.GUI.MainWindow"
+        Title="LemonLoader Patcher"
+        Width="1120" Height="780" MinWidth="900" MinHeight="640">
+  <Grid RowDefinitions="64,*,56">
+    <Border Background="#17212B" Padding="24,0">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel VerticalAlignment="Center" Spacing="2">
+          <TextBlock Text="LemonLoader Patcher" Foreground="#FFFFFF"
+                     FontSize="19" FontWeight="SemiBold" />
+          <TextBlock Text="Android IL2CPP package workspace" Foreground="#AFC0CC"
+                     FontSize="12" />
+        </StackPanel>
+        <Border Grid.Column="1" BorderBrush="#3D4A54" BorderThickness="1"
+                CornerRadius="4" Padding="10,5" VerticalAlignment="Center">
+          <TextBlock Text="ARM64 · IL2CPP" Foreground="#D7E1E7"
+                     FontFamily="Cascadia Mono, Consolas" FontSize="11" />
+        </Border>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" ColumnDefinitions="3*,2*" ColumnSpacing="0">
+      <TabControl x:Name="WorkspaceTabs" Margin="20,16,12,16">
+        <TabItem Header="Patch APK">
+          <ScrollViewer Margin="0,14,8,0"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto"
+                        AllowAutoHide="False">
+            <StackPanel Margin="0,0,8,0" Spacing="18">
+              <StackPanel Spacing="10">
+                <TextBlock Text="Package" Classes="section-title" />
+                <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
+                      ColumnSpacing="8" RowSpacing="8">
+                  <TextBlock Text="Input APK" Classes="field-label" />
+                  <TextBox x:Name="InputApkPath" Grid.Column="1"
+                           Classes="single-line"
+                           Watermark="Select the original game APK" />
+                  <Button Grid.Column="2" Content="⋯" Classes="browse"
+                          Tag="InputApkPath" Click="BrowseFileClick"
+                          AutomationProperties.Name="Choose input APK"
+                          ToolTip.Tip="Choose input APK" />
+
+                  <TextBlock Grid.Row="1" Text="LemonLoader Release" Classes="field-label" />
+                  <TextBox x:Name="ReleasePath" Grid.Row="1" Grid.Column="1"
+                           Classes="single-line"
+                           Watermark="Bundled Release or latest download" />
+                  <Button Grid.Row="1" Grid.Column="2" Content="⋯" Classes="browse"
+                          Tag="ReleasePath" Click="BrowseFileClick"
+                          AutomationProperties.Name="Choose LemonLoader Release"
+                          ToolTip.Tip="Choose LemonLoader Release" />
+
+                  <TextBlock Grid.Row="2" Text="Output APK" Classes="field-label" />
+                  <TextBox x:Name="OutputApkPath" Grid.Row="2" Grid.Column="1"
+                           Classes="single-line"
+                           Watermark="Choose where to write the patched APK" />
+                  <Button Grid.Row="2" Grid.Column="2" Content="⋯" Classes="browse"
+                          Click="BrowseOutputApkClick"
+                          AutomationProperties.Name="Choose output APK"
+                          ToolTip.Tip="Choose output APK" />
+                </Grid>
+              </StackPanel>
+
+              <Border BorderBrush="#D9DEE2" BorderThickness="0,1,0,0" />
+
+              <StackPanel Spacing="10">
+                <TextBlock Text="Packaged files" Classes="section-title" />
+                <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
+                      ColumnSpacing="8" RowSpacing="8">
+                  <TextBlock Text="Deployment" Classes="field-label" />
+                  <TextBox x:Name="DeploymentPath" Grid.Column="1"
+                           Classes="single-line"
+                           Watermark="MelonLoader mirror with Mods, Plugins, UserLibs and UserData" />
+                  <Button Grid.Column="2" Content="⋯" Classes="browse"
+                          Tag="DeploymentPath" Click="BrowseFolderClick"
+                          AutomationProperties.Name="Choose deployment directory"
+                          ToolTip.Tip="Choose deployment directory" />
+
+                  <TextBlock Grid.Row="1" Text="Update profile" Classes="field-label" />
+                  <ComboBox x:Name="DeploymentProfile" Grid.Row="1" Grid.Column="1"
+                            SelectedIndex="0">
+                    <ComboBoxItem Content="development · keep existing files" Tag="development" />
+                    <ComboBoxItem Content="production · update packaged files" Tag="production" />
+                    <ComboBoxItem Content="locked · enforce code files" Tag="locked" />
+                  </ComboBox>
+
+                  <TextBlock Grid.Row="2" Text="Policy overrides" Classes="field-label-top" />
+                  <TextBox x:Name="DeploymentPolicyRules" Grid.Row="2" Grid.Column="1"
+                           Classes="multiline" AcceptsReturn="True"
+                           Watermark="One path=policy rule per line" />
+                </Grid>
+              </StackPanel>
+
+              <Expander Header="Interop overrides" Classes="advanced"
+                        IsExpanded="False" HorizontalAlignment="Stretch">
+                <Grid Margin="16,12,16,16" ColumnDefinitions="*,*"
+                      RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="Unity version" Classes="advanced-field-label" />
+                    <TextBox x:Name="UnityVersion" Classes="single-line"
+                             Watermark="Auto-detected" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Unity libraries" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="UnityLibrariesPath" Classes="single-line"
+                               Watermark="Downloaded automatically" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="UnityLibrariesPath" Click="BrowseFolderClick"
+                              AutomationProperties.Name="Choose Unity libraries directory"
+                              ToolTip.Tip="Choose Unity libraries directory" />
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Grid.Row="1" Spacing="4">
+                    <TextBlock Text="Game assembly" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="GameAssemblyPath" Classes="single-line"
+                               Watermark="libil2cpp.so from APK" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="GameAssemblyPath" Click="BrowseFileClick"
+                              AutomationProperties.Name="Choose libil2cpp.so"
+                              ToolTip.Tip="Choose libil2cpp.so" />
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Metadata" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="MetadataPath" Classes="single-line"
+                               Watermark="global-metadata.dat from APK" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="MetadataPath" Click="BrowseFileClick"
+                              AutomationProperties.Name="Choose global-metadata.dat"
+                              ToolTip.Tip="Choose global-metadata.dat" />
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Grid.Row="2" Spacing="4">
+                    <TextBlock Text="Interop output" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="InteropOutputPath" Classes="single-line"
+                               Watermark="Optional reference directory" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="InteropOutputPath" Click="BrowseFolderClick"
+                              AutomationProperties.Name="Choose Interop output directory"
+                              ToolTip.Tip="Choose Interop output directory" />
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
+                    <TextBlock Text="Cpp2IL" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="Cpp2IlPath" Classes="single-line"
+                               Watermark="Downloaded automatically" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="Cpp2IlPath" Click="BrowseFileClick"
+                              AutomationProperties.Name="Choose Cpp2IL executable"
+                              ToolTip.Tip="Choose Cpp2IL executable" />
+                    </Grid>
+                  </StackPanel>
+                </Grid>
+              </Expander>
+
+              <Expander Header="Android SDK and signing" Classes="advanced"
+                        IsExpanded="False" HorizontalAlignment="Stretch">
+                <StackPanel Margin="16,12,16,16" Spacing="10">
+                  <StackPanel Spacing="4">
+                    <TextBlock Text="Android SDK" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="AndroidSdkPath" Classes="single-line"
+                               Watermark="ANDROID_SDK_ROOT when empty" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="AndroidSdkPath" Click="BrowseFolderClick"
+                              AutomationProperties.Name="Choose Android SDK directory"
+                              ToolTip.Tip="Choose Android SDK directory" />
+                    </Grid>
+                  </StackPanel>
+                  <CheckBox x:Name="EnableSigning" Content="Sign the output APK"
+                            IsChecked="False" IsCheckedChanged="SigningToggleChanged" />
+                  <Grid x:Name="SigningFields" IsVisible="False"
+                        ColumnDefinitions="*,*" RowDefinitions="Auto,Auto"
+                        ColumnSpacing="12" RowSpacing="10">
+                    <StackPanel Spacing="4">
+                      <TextBlock Text="Keystore" Classes="advanced-field-label" />
+                      <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                        <TextBox x:Name="KeystorePath" Classes="single-line" />
+                        <Button Grid.Column="1" Content="⋯" Classes="browse"
+                                Tag="KeystorePath" Click="BrowseFileClick"
+                                AutomationProperties.Name="Choose signing keystore"
+                                ToolTip.Tip="Choose keystore" />
+                      </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Spacing="4">
+                      <TextBlock Text="Key alias" Classes="advanced-field-label" />
+                      <TextBox x:Name="KeyAlias" Classes="single-line" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Spacing="4">
+                      <TextBlock Text="Store password" Classes="advanced-field-label" />
+                      <TextBox x:Name="StorePassword" Classes="single-line"
+                               PasswordChar="●" />
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                      <TextBlock Text="Key password" Classes="advanced-field-label" />
+                      <TextBox x:Name="KeyPassword" Classes="single-line"
+                               PasswordChar="●" Watermark="Uses store password" />
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Expander>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Unity dependencies">
+          <StackPanel Margin="0,18,8,0" Spacing="18">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Restore Unity references" Classes="section-title" />
+              <TextBlock Text="Create the managed reference set used by both Interop generation and Mod projects."
+                         Classes="supporting" TextWrapping="Wrap" />
+            </StackPanel>
+            <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
+                  ColumnSpacing="8" RowSpacing="8">
+              <TextBlock Text="Unity version" Classes="field-label" />
+              <TextBox x:Name="DependenciesUnityVersion" Grid.Column="1"
+                       Classes="single-line"
+                       Watermark="For example 6000.3.8f1" />
+              <TextBlock Grid.Row="1" Text="Output directory" Classes="field-label" />
+              <TextBox x:Name="DependenciesOutputPath" Grid.Row="1" Grid.Column="1"
+                       Classes="single-line" />
+              <Button Grid.Row="1" Grid.Column="2" Content="⋯" Classes="browse"
+                      Tag="DependenciesOutputPath" Click="BrowseFolderClick"
+                      AutomationProperties.Name="Choose Unity dependencies output"
+                      ToolTip.Tip="Choose output directory" />
+              <TextBlock Grid.Row="2" Text="Cache directory" Classes="field-label" />
+              <TextBox x:Name="DependenciesCachePath" Grid.Row="2" Grid.Column="1"
+                       Classes="single-line"
+                       Watermark="Optional" />
+              <Button Grid.Row="2" Grid.Column="2" Content="⋯" Classes="browse"
+                      Tag="DependenciesCachePath" Click="BrowseFolderClick"
+                      AutomationProperties.Name="Choose Unity dependencies cache"
+                      ToolTip.Tip="Choose cache directory" />
+            </Grid>
+          </StackPanel>
+        </TabItem>
+      </TabControl>
+
+      <Border Grid.Column="1" Background="#202A33" Padding="18,16"
+              BorderBrush="#11181E" BorderThickness="1,0,0,0">
+        <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12">
+          <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+            <Border Width="4" Height="34" Background="#38A174" CornerRadius="2" />
+            <StackPanel Grid.Column="1" Spacing="2">
+              <TextBlock Text="Current task" Foreground="#FFFFFF" FontWeight="SemiBold" />
+              <TextBlock x:Name="StatusText" Text="Ready" Foreground="#B8C5CE"
+                         FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+          <ProgressBar x:Name="OperationProgress" Grid.Row="1" Height="3"
+                       IsIndeterminate="True" IsVisible="False" />
+          <TextBox x:Name="OperationLog" Grid.Row="2" IsReadOnly="True"
+                   Classes="log-output"
+                   AcceptsReturn="True" TextWrapping="Wrap"
+                   FontFamily="Cascadia Mono, Consolas" FontSize="11"
+                   Watermark="Progress and tool output appear here." />
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#D9DEE2"
+            BorderThickness="0,1,0,0" Padding="20,0">
+      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+        <TextBlock x:Name="ValidationText" VerticalAlignment="Center"
+                   Foreground="#B13A3A" TextWrapping="Wrap" />
+        <Button x:Name="CancelButton" Grid.Column="1" Content="Cancel"
+                IsEnabled="False" Click="CancelClick" />
+        <Button x:Name="RunButton" Grid.Column="2" Content="Patch APK"
+                Classes="primary" Click="RunClick" />
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

@@ -1,0 +1,128 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="LemonLoader.Patcher.GUI.App">
+  <Application.Styles>
+    <FluentTheme />
+    <Style Selector="Window">
+      <Setter Property="Background" Value="#F3F5F6" />
+      <Setter Property="FontFamily" Value="Segoe UI, Arial" />
+      <Setter Property="FontSize" Value="13" />
+    </Style>
+    <Style Selector="TextBlock.section-title">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="#1F2933" />
+    </Style>
+    <Style Selector="TextBlock.supporting">
+      <Setter Property="Foreground" Value="#62707D" />
+      <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="TextBlock.field-label">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Foreground" Value="#394651" />
+      <Setter Property="LineHeight" Value="18" />
+    </Style>
+    <Style Selector="TextBlock.field-label-top">
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="0,7,0,0" />
+      <Setter Property="Foreground" Value="#394651" />
+      <Setter Property="LineHeight" Value="18" />
+    </Style>
+    <Style Selector="TextBlock.advanced-field-label">
+      <Setter Property="Foreground" Value="#394651" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="LineHeight" Value="16" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="BorderBrush" Value="#C8D0D6" />
+    </Style>
+    <Style Selector="TextBox.single-line">
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="Padding" Value="10,0" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="LineHeight" Value="18" />
+    </Style>
+    <Style Selector="TextBox.multiline">
+      <Setter Property="MinHeight" Value="72" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Top" />
+      <Setter Property="LineHeight" Value="18" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.browse">
+      <Setter Property="Width" Value="36" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="#2F8F65" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+      <Setter Property="Padding" Value="20,7" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#287B57" />
+    </Style>
+    <Style Selector="TabItem">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="MinHeight" Value="36" />
+    </Style>
+    <Style Selector="TextBox.log-output">
+      <Setter Property="Background" Value="#172028" />
+      <Setter Property="Foreground" Value="#D7E1E7" />
+      <Setter Property="CaretBrush" Value="Transparent" />
+      <Setter Property="SelectionBrush" Value="#2F8F65" />
+      <Setter Property="BorderBrush" Value="#3B4852" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="12" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Top" />
+    </Style>
+    <Style Selector="TextBox.log-output:pointerover">
+      <Setter Property="Foreground" Value="#D7E1E7" />
+    </Style>
+    <Style Selector="TextBox.log-output:pointerover /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="#1A252E" />
+      <Setter Property="BorderBrush" Value="#52616C" />
+    </Style>
+    <Style Selector="TextBox.log-output:focus">
+      <Setter Property="Foreground" Value="#D7E1E7" />
+    </Style>
+    <Style Selector="TextBox.log-output:focus /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="#172028" />
+      <Setter Property="BorderBrush" Value="#38A174" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="TextBox.log-output /template/ TextBlock#PART_Watermark">
+      <Setter Property="Foreground" Value="#8395A2" />
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="Expander.advanced">
+      <Setter Property="BorderBrush" Value="#D9DEE2" />
+      <Setter Property="BorderThickness" Value="0,1,0,0" />
+      <Setter Property="Padding" Value="0,12,0,0" />
+    </Style>
+  </Application.Styles>
+</Application>
