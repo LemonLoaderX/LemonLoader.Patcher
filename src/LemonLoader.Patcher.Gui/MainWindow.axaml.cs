@@ -19,6 +19,10 @@ public sealed partial class MainWindow : Window
             Add("--unity-version", UnityVersion.Text); Add("--unity-libs", UnityLibraries.Text);
             Add("--interop-output", InteropOutput.Text); Add("--android-sdk", AndroidSdk.Text);
             Add("--keystore", Keystore.Text); Add("--ks-alias", KeyAlias.Text); Add("--ks-pass", StorePassword.Text);
+            Add(
+                "--deployment-profile",
+                (DeploymentProfile.SelectedItem as ComboBoxItem)?.Content?.ToString());
+            AddMany("--deployment-policy", DeploymentPolicyRules.Text);
             AddMany("--deployment", DeploymentPaths.Text);
             AddMany("--mod", ModPaths.Text);
             AddMany("--plugin", PluginPaths.Text);

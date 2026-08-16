@@ -5,8 +5,8 @@ internal static class ReleaseValidator
 {
     private const string ManifestName = "lemonloader-release.json";
     private const string MainLibraryPath = "lib/arm64-v8a/libmain.so";
-    private const string PayloadManifestPath = "assets/LemonLoader/payload.json";
-    private const int AssetLayoutVersion = 4;
+    private const string PayloadManifestPath = AndroidPayloadContract.PayloadManifestPath;
+    private const int AssetLayoutVersion = AndroidPayloadContract.FormatVersion;
 
     public static void Validate(string releaseRoot)
     {
@@ -82,6 +82,11 @@ internal static class ReleaseValidator
             throw new InvalidDataException(
                 $"Release asset '{invalidAsset}' is outside the consolidated assets/LemonLoader tree.");
 
+        var documentation = files.FirstOrDefault(AndroidPayloadContract.IsForbiddenReleasePath);
+        if (documentation is not null)
+            throw new InvalidDataException(
+                $"Android Release must not contain loader documentation '{documentation}'.");
+
         var publicNativeLibraries = files
             .Where(path => path.StartsWith("lib/arm64-v8a/", StringComparison.Ordinal))
             .ToArray();
@@ -101,10 +106,45 @@ internal static class ReleaseValidator
             if (hash is null || hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
                 throw new InvalidDataException($"The Android payload manifest property '{propertyName}' is not SHA-256.");
             var scope = propertyName == "runtimeSha256" ? "runtime" : "deployment";
-            var actualHash = ComputePayloadTreeHash(root, scope);
+            var actualHash = AndroidPayloadContract.ComputeTreeHash(root, scope);
             if (!string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException(
                     $"The Android payload manifest hash for '{scope}' does not match its files.");
+        }
+        foreach (var domain in new[]
+                 {
+                     (Property: "loaderSha256", Scope: "runtime/loader"),
+                     (Property: "dotnetSha256", Scope: "runtime/dotnet"),
+                     (Property: "interopSha256", Scope: "runtime/interop")
+                 })
+        {
+            if (!payload.TryGetProperty(domain.Property, out var property))
+                continue;
+            var hash = property.GetString();
+            var actualHash = AndroidPayloadContract.ComputeTreeHash(root, domain.Scope);
+            if (hash is null || hash.Length != 64 ||
+                hash.Any(character => !Uri.IsHexDigit(character)) ||
+                !string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"The Android payload manifest hash for '{domain.Scope}' is invalid.");
+            }
+        }
+
+        if (payload.GetProperty("deploymentProfile").GetString() != "development" ||
+            payload.GetProperty("deploymentFiles").GetArrayLength() != 0)
+        {
+            throw new InvalidDataException(
+                "A game-independent Release must use the development profile and contain no deployment files.");
+        }
+        var emptyDeploymentRevision = Convert.ToHexString(SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes("deployment-revision=1")))
+            .ToLowerInvariant();
+        if (payload.GetProperty("deploymentRevisionSha256").GetString() !=
+            emptyDeploymentRevision)
+        {
+            throw new InvalidDataException(
+                "A game-independent Release has an invalid empty deployment revision.");
         }
 
         var privateLibraries = payload.GetProperty("privateNativeLibraries")
@@ -120,30 +160,6 @@ internal static class ReleaseValidator
                     $"The private Android OpenSSL dependency '{library}' is missing or undeclared.");
             }
         }
-    }
-
-    private static string ComputePayloadTreeHash(string releaseRoot, string scope)
-    {
-        var payloadRoot = Path.Combine(releaseRoot, "assets", "LemonLoader");
-        var scopeRoot = Path.Combine(payloadRoot, scope);
-        var filePaths = Directory.Exists(scopeRoot)
-            ? Directory.EnumerateFiles(scopeRoot, "*", SearchOption.AllDirectories)
-            : Enumerable.Empty<string>();
-        var files = filePaths.Select(path => new
-            {
-                Path = path,
-                RelativePath = Path.GetRelativePath(payloadRoot, path).Replace('\\', '/')
-            })
-            .OrderBy(file => file.RelativePath, StringComparer.Ordinal);
-        var lines = new List<string> { $"layout-version={AssetLayoutVersion}", $"scope={scope}" };
-        foreach (var file in files)
-        {
-            using var input = File.OpenRead(file.Path);
-            var hash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            lines.Add($"{file.RelativePath}|{input.Length}|{hash}");
-        }
-        return Convert.ToHexString(SHA256.HashData(
-            System.Text.Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
     }
 
     private static string ValidateRelativePath(string root, string relativePath)

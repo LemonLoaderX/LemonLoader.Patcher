@@ -20,6 +20,8 @@ dotnet run --project src/LemonLoader.Patcher -- patch `
   --plugin ExamplePlugin.dll `
   --user-lib SharedLibrary.dll `
   --user-data UserData `
+  --deployment-profile production `
+  --deployment-policy "UserData/Managed/**=refresh" `
   --align
 ```
 
@@ -97,11 +99,17 @@ publish.
 
 The Release manifest is validated as patcher input but is not copied into an
 APK. APK payload merging is restricted to the Release `assets` and `lib` trees.
-The patcher requires asset layout v4 and `assets/LemonLoader/payload.json`, so an
+The patcher requires asset layout v5 and `assets/LemonLoader/payload.json`, so an
 older Release is rejected instead of producing a mixed-layout APK. All runtime,
 Interop, and deployment inputs live under `assets/LemonLoader`; legacy
 `assets/dotnet`, `assets/MelonLoader`, and `assets/LemonLoader/Mods` entries are
 removed during migration.
+
+The payload keeps independent loader, dotnet, and Interop hashes. Updating
+`MelonLoader.dll` therefore republishes the loader-owned `net6` and
+`Dependencies` directories without re-extracting dotnet, Interop, `Latest.log`,
+or `Logs`. Desktop `runtime/loader/Documentation` content is rejected from both
+the Release and final APK.
 
 The deployment tree mirrors the MelonLoader base directory. `--deployment`
 recursively merges an entire mirror, including arbitrary future top-level
@@ -110,9 +118,22 @@ inputs that merge files or directory contents into `Mods`, `Plugins`, `UserLibs`
 and `UserData` respectively. For example, `--user-data UserData` can package
 `UserData/Fonts/font.ab`. On launch, the bootstrap copies each deployment file to
 the same relative runtime path.
-Existing user or ADB-deployed files are preserved, and duplicate APK target paths
-are rejected instead of choosing one input silently. The Patcher recomputes the
-independent runtime and deployment hashes after all inputs are merged.
+Deployment policy is selected by profile, not declared for every file. The
+`development` profile seeds only missing files. `production` refreshes Mods,
+Plugins, and UserLibs on a new packaged deployment while upgrading unchanged
+UserData. `locked` enforces packaged Mods, Plugins, and UserLibs on every launch.
+Use repeatable `--deployment-policy path=policy` or
+`--deployment-policy directory/**=policy` only for exceptions. Exact rules beat
+the longest matching directory rule, and unmatched rules are rejected. The
+Patcher expands the effective `seed`, `upgrade`, `refresh`, or `enforce` policy
+into each manifest file, so native startup has no profile-default ambiguity.
+
+Duplicate targets, file/directory target conflicts, unsafe paths, and bootstrap-
+reserved directories are rejected instead of choosing one input silently. The
+Patcher recomputes independent runtime and deployment content hashes plus a
+deployment revision that also covers effective policies. See
+[the Android deployment design](../LemonLoader/docs/android/DEPLOYMENT.md) for
+ownership, obsolete-file, backup, and rollback semantics.
 
 Only `libmain.so` may replace an original APK native entry. The bootstrap links
 libc++ statically; OpenSSL is stored in the private .NET asset tree. An APK that

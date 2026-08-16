@@ -84,6 +84,8 @@ public static class PatcherApplication
               [--cpp2il <path>] [--deployment <directory>]...
               [--mod <path>]... [--plugin <path>]...
               [--user-lib <path>]... [--user-data <path>]...
+              [--deployment-profile <development|production|locked>]
+              [--deployment-policy <path-or-directory/**=policy>]...
               [--android-sdk <path>] [--align]
               [--keystore <path> --ks-pass <password> --ks-alias <alias> [--key-pass <password>]]
 
@@ -150,6 +152,7 @@ public sealed record PatchOptions(
     string? InteropOutputPath,
     string? Cpp2IlPath,
     IReadOnlyList<DeploymentInput> DeploymentInputs,
+    DeploymentPolicyOptions DeploymentPolicies,
     string? AndroidSdkRoot,
     bool Align,
     string? KeystorePath,
@@ -162,6 +165,7 @@ public sealed record PatchOptions(
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var flags = new HashSet<string>(StringComparer.Ordinal);
         var deploymentInputs = new List<DeploymentInput>();
+        var deploymentPolicyRules = new List<string>();
         var deploymentOptions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["--deployment"] = "",
@@ -175,6 +179,7 @@ public sealed record PatchOptions(
             "--apk", "--release", "--output", "--libil2cpp", "--metadata",
             "--unity-version", "--unity-libs", "--interop-output", "--cpp2il",
             "--deployment", "--mod", "--plugin", "--user-lib", "--user-data",
+            "--deployment-profile", "--deployment-policy",
             "--android-sdk", "--keystore", "--ks-pass", "--ks-alias", "--key-pass"
         };
         for (var index = 0; index < args.Length; index++)
@@ -188,6 +193,8 @@ public sealed record PatchOptions(
             var value = args[++index];
             if (deploymentOptions.TryGetValue(name, out var targetDirectory))
                 deploymentInputs.Add(new(Path.GetFullPath(value), targetDirectory));
+            else if (name == "--deployment-policy")
+                deploymentPolicyRules.Add(value);
             else if (!values.TryAdd(name, value))
                 throw new ArgumentException($"Option '{name}' was supplied more than once.");
         }
@@ -201,6 +208,7 @@ public sealed record PatchOptions(
             Required("--apk"), OptionalPath("--release"), Required("--output"),
             OptionalPath("--libil2cpp"), OptionalPath("--metadata"), Optional("--unity-version"),
             OptionalPath("--unity-libs"), OptionalPath("--interop-output"), OptionalPath("--cpp2il"), deploymentInputs,
+            DeploymentPolicyOptions.Create(Optional("--deployment-profile"), deploymentPolicyRules),
             OptionalPath("--android-sdk"), flags.Contains("--align"), OptionalPath("--keystore"),
             Optional("--ks-pass"), Optional("--ks-alias"), Optional("--key-pass"));
         var pathComparison = OperatingSystem.IsWindows()
@@ -233,8 +241,8 @@ public sealed class ApkPatchPipeline(PatchOptions options)
     private const string MetadataEntry = "assets/bin/Data/Managed/Metadata/global-metadata.dat";
     private const string ManagersEntry = "assets/bin/Data/globalgamemanagers";
     private const string MainEntry = "lib/arm64-v8a/libmain.so";
-    private const string PayloadEntry = "assets/LemonLoader/payload.json";
-    private const int AssetLayoutVersion = 4;
+    private const string PayloadEntry = AndroidPayloadContract.PayloadManifestPath;
+    private const int AssetLayoutVersion = AndroidPayloadContract.FormatVersion;
 
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -266,7 +274,12 @@ public sealed class ApkPatchPipeline(PatchOptions options)
 
             var unsignedApk = Path.Combine(workRoot, "unsigned.apk");
             File.Copy(options.ApkPath, unsignedApk, true);
-            MergeZip(unsignedApk, releaseRoot, generatedInteropRoot, options.DeploymentInputs);
+            MergeZip(
+                unsignedApk,
+                releaseRoot,
+                generatedInteropRoot,
+                options.DeploymentInputs,
+                options.DeploymentPolicies);
             await FinalizeApkAsync(unsignedApk, workRoot, cancellationToken);
             Console.WriteLine($"Patched APK: {options.OutputPath}");
             Console.WriteLine($"SHA-256: {Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(options.OutputPath))).ToLowerInvariant()}");
@@ -392,7 +405,8 @@ public sealed class ApkPatchPipeline(PatchOptions options)
         string apkPath,
         string releaseRoot,
         string interopRoot,
-        IReadOnlyList<DeploymentInput> deploymentInputs)
+        IReadOnlyList<DeploymentInput> deploymentInputs,
+        DeploymentPolicyOptions? deploymentPolicies = null)
     {
         var payload = ReadPayloadDescriptor(Path.Combine(
             releaseRoot,
@@ -410,28 +424,44 @@ public sealed class ApkPatchPipeline(PatchOptions options)
         }
         RemovePackagingMetadata(archive);
         AddTree(archive, Path.Combine(releaseRoot, "assets"), "assets");
+        ValidateNoForbiddenRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(releaseRoot, "lib"));
         RemovePackagingMetadata(archive);
         foreach (var dll in Directory.GetFiles(interopRoot, "*.dll"))
-            AddFile(archive, dll, $"assets/LemonLoader/runtime/loader/Il2CppAssemblies/{Path.GetFileName(dll)}");
+            AddFile(archive, dll, $"assets/LemonLoader/runtime/interop/{Path.GetFileName(dll)}");
         var interopManifest = Path.Combine(interopRoot, InteropGenerationManifest.FileName);
         RequireFile(interopManifest, "Interop generation manifest");
         AddFile(
             archive,
             interopManifest,
-            $"assets/LemonLoader/runtime/loader/Il2CppAssemblies/{InteropGenerationManifest.FileName}");
+            $"assets/LemonLoader/runtime/interop/{InteropGenerationManifest.FileName}");
         foreach (var input in deploymentInputs)
             AddDeploymentInput(archive, input);
-        RefreshPayloadDescriptor(archive, payload);
+        ValidateDeploymentEntries(archive);
+        RefreshPayloadDescriptor(
+            archive,
+            payload,
+            deploymentPolicies ?? DeploymentPolicyOptions.Create(null, []));
         ValidateUniqueEntries(archive);
     }
 
-    private static void RefreshPayloadDescriptor(ZipArchive archive, PayloadDescriptor descriptor)
+    private static void RefreshPayloadDescriptor(
+        ZipArchive archive,
+        PayloadDescriptor descriptor,
+        DeploymentPolicyOptions deploymentPolicies)
     {
+        var deploymentFiles = BuildDeploymentFileDescriptors(archive, deploymentPolicies);
+        deploymentPolicies.ValidateRuleCoverage(deploymentFiles.Select(file => file.Path));
         var updated = descriptor with
         {
-            RuntimeSha256 = ComputePayloadTreeHash(archive, "runtime"),
-            DeploymentSha256 = ComputePayloadTreeHash(archive, "deployment")
+            RuntimeSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime"),
+            LoaderSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/loader"),
+            DotnetSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/dotnet"),
+            InteropSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/interop"),
+            DeploymentSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "deployment"),
+            DeploymentProfile = deploymentPolicies.Profile.ToString().ToLowerInvariant(),
+            DeploymentRevisionSha256 = ComputeDeploymentRevision(deploymentFiles),
+            DeploymentFiles = deploymentFiles
         };
         archive.GetEntry(PayloadEntry)?.Delete();
         var manifestEntry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
@@ -439,39 +469,49 @@ public sealed class ApkPatchPipeline(PatchOptions options)
         JsonSerializer.Serialize(output, updated, PayloadJsonOptions);
     }
 
-    private static string ComputePayloadTreeHash(ZipArchive archive, string scope)
+    internal static string ComputeDeploymentRevision(
+        IReadOnlyList<DeploymentFileDescriptor> files)
     {
-        var scopePrefix = $"assets/LemonLoader/{scope}/";
-        var payloadEntries = archive.Entries
-            .Where(entry => !string.IsNullOrEmpty(entry.Name) &&
-                            entry.FullName.StartsWith(scopePrefix, StringComparison.Ordinal))
-            .OrderBy(entry => entry.FullName, StringComparer.Ordinal)
-            .Select(entry => entry.FullName)
-            .ToArray();
-        var payloadLines = new List<string>(payloadEntries.Length + 2)
-        {
-            $"layout-version={AssetLayoutVersion}",
-            $"scope={scope}"
-        };
-        foreach (var name in payloadEntries)
-        {
-            var entry = archive.GetEntry(name)!;
-            long length = 0;
-            using var contentHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            using var stream = entry.Open();
-            var buffer = new byte[64 * 1024];
-            int bytesRead;
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) != 0)
-            {
-                contentHasher.AppendData(buffer, 0, bytesRead);
-                length += bytesRead;
-            }
-            var contentHash = Convert.ToHexString(contentHasher.GetHashAndReset()).ToLowerInvariant();
-            payloadLines.Add($"{name["assets/LemonLoader/".Length..]}|{length}|{contentHash}");
-        }
+        var lines = new List<string>(files.Count + 1) { "deployment-revision=1" };
+        lines.AddRange(files
+            .OrderBy(file => file.Path, StringComparer.Ordinal)
+            .Select(file => $"{file.Path}|{file.Size}|{file.Sha256}|{file.Policy}"));
         return Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(string.Join('\n', payloadLines))))
+                Encoding.UTF8.GetBytes(string.Join('\n', lines))))
             .ToLowerInvariant();
+    }
+
+    private static IReadOnlyList<DeploymentFileDescriptor> BuildDeploymentFileDescriptors(
+        ZipArchive archive,
+        DeploymentPolicyOptions deploymentPolicies)
+    {
+        const string prefix = "assets/LemonLoader/deployment/";
+        return archive.Entries
+            .Where(entry =>
+                !string.IsNullOrEmpty(entry.Name) &&
+                entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
+            .OrderBy(entry => entry.FullName, StringComparer.Ordinal)
+            .Select(entry =>
+            {
+                long length = 0;
+                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                using var input = entry.Open();
+                var buffer = new byte[64 * 1024];
+                int bytesRead;
+                while ((bytesRead = input.Read(buffer, 0, buffer.Length)) != 0)
+                {
+                    hasher.AppendData(buffer, 0, bytesRead);
+                    length += bytesRead;
+                }
+                var hash = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
+                var path = entry.FullName[prefix.Length..];
+                return new DeploymentFileDescriptor(
+                    path,
+                    length,
+                    hash,
+                    DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path)));
+            })
+            .ToArray();
     }
 
     private static readonly JsonSerializerOptions PayloadJsonOptions = new()
@@ -483,8 +523,20 @@ public sealed class ApkPatchPipeline(PatchOptions options)
     private sealed record PayloadDescriptor(
         int FormatVersion,
         string RuntimeSha256,
+        string? LoaderSha256,
+        string? DotnetSha256,
+        string? InteropSha256,
         string DeploymentSha256,
+        string DeploymentProfile,
+        string DeploymentRevisionSha256,
+        IReadOnlyList<DeploymentFileDescriptor> DeploymentFiles,
         IReadOnlyList<string> PrivateNativeLibraries);
+
+    internal sealed record DeploymentFileDescriptor(
+        string Path,
+        long Size,
+        string Sha256,
+        string Policy);
 
     private static PayloadDescriptor ReadPayloadDescriptor(string path)
     {
@@ -495,6 +547,10 @@ public sealed class ApkPatchPipeline(PatchOptions options)
         if (descriptor.FormatVersion != AssetLayoutVersion)
             throw new InvalidDataException(
                 $"Unsupported Android payload layout {descriptor.FormatVersion}; expected {AssetLayoutVersion}.");
+        if (descriptor.DeploymentFiles is null || descriptor.DeploymentProfile is null ||
+            descriptor.DeploymentRevisionSha256 is null)
+            throw new InvalidDataException(
+                "Android payload manifest does not define deployment policy metadata.");
         if (descriptor.PrivateNativeLibraries.Any(name =>
                 string.IsNullOrWhiteSpace(name) ||
                 name.Contains('/') ||
@@ -513,6 +569,52 @@ public sealed class ApkPatchPipeline(PatchOptions options)
             .FirstOrDefault(group => group.Count() != 1);
         if (duplicate is not null)
             throw new InvalidDataException($"APK contains duplicate ZIP entry '{duplicate.Key}'.");
+    }
+
+    private static void ValidateNoForbiddenRuntimeEntries(ZipArchive archive)
+    {
+        var forbidden = archive.Entries.FirstOrDefault(entry =>
+            AndroidPayloadContract.IsForbiddenReleasePath(entry.FullName));
+        if (forbidden is not null)
+        {
+            throw new InvalidDataException(
+                $"Android payload must not contain loader documentation '{forbidden.FullName}'.");
+        }
+    }
+
+    private static void ValidateDeploymentEntries(ZipArchive archive)
+    {
+        const string prefix = "assets/LemonLoader/deployment/";
+        var paths = archive.Entries
+            .Where(entry =>
+                !string.IsNullOrEmpty(entry.Name) &&
+                entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
+            .Select(entry => entry.FullName[prefix.Length..])
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        var files = paths.ToHashSet(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            try
+            {
+                DeploymentPolicyOptions.ValidateRelativePath(path, "deployment file");
+            }
+            catch (ArgumentException exception)
+            {
+                throw new InvalidDataException(exception.Message, exception);
+            }
+            var separator = path.IndexOf('/');
+            while (separator >= 0)
+            {
+                var parent = path[..separator];
+                if (files.Contains(parent))
+                {
+                    throw new InvalidDataException(
+                        $"Deployment target '{parent}' conflicts with child file '{path}'.");
+                }
+                separator = path.IndexOf('/', separator + 1);
+            }
+        }
     }
 
     private static void ValidatePrivateNativeLibraries(

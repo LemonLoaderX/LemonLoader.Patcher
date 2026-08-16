@@ -12,6 +12,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("APK payload layout replacement", TestApkPayloadLayoutReplacementAsync),
+    ("Deployment policy resolution", TestDeploymentPolicyResolutionAsync),
     ("Native library collision rejection", TestNativeLibraryCollisionAsync),
     ("Duplicate APK entry rejection", TestDuplicateApkEntryAsync),
     ("Safe option parsing", TestOptionParsingAsync),
@@ -164,15 +165,18 @@ static Task TestReleaseValidationAsync()
             "assets/LemonLoader/payload.json",
             JsonSerializer.Serialize(new
             {
-                formatVersion = 4,
+                formatVersion = AndroidPayloadContract.FormatVersion,
                 runtimeSha256 = ComputePayloadDirectoryHash(root, "runtime"),
                 deploymentSha256 = ComputePayloadDirectoryHash(root, "deployment"),
+                deploymentProfile = "development",
+                deploymentRevisionSha256 = ComputeDeploymentRevision([]),
+                deploymentFiles = Array.Empty<object>(),
                 privateNativeLibraries = new[] { "lemcrypto.so", "lemssl.so" }
             })));
         var manifest = new
         {
             formatVersion = 1,
-            assetLayoutVersion = 4,
+            assetLayoutVersion = AndroidPayloadContract.FormatVersion,
             gameAssembliesIncluded = false,
             files = files.Select(file => new
             {
@@ -185,6 +189,15 @@ static Task TestReleaseValidationAsync()
             Path.Combine(root, "lemonloader-release.json"),
             JsonSerializer.Serialize(manifest));
         ReleaseValidator.Validate(root);
+
+        var documentation = WritePayload(
+            root,
+            "assets/LemonLoader/runtime/loader/Documentation/README.md",
+            "not for Android");
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
+        File.Delete(Path.Combine(
+            root,
+            documentation.Path.Replace('/', Path.DirectorySeparatorChar)));
 
         File.AppendAllText(Path.Combine(root, "lib", "arm64-v8a", "libmain.so"), "corrupt");
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
@@ -235,7 +248,9 @@ static Task TestApkPayloadLayoutReplacementAsync()
             new(userLibPath, "UserLibs"),
             new(userDataRoot, "UserData"),
             new(deploymentRoot, "")
-        ]);
+        ], DeploymentPolicyOptions.Create(
+            "production",
+            ["UserData/Fonts/font.ab=enforce"]));
 
         using var archive = ZipFile.OpenRead(apkPath);
         AssertTrue(
@@ -246,8 +261,8 @@ static Task TestApkPayloadLayoutReplacementAsync()
                 entry.FullName != "assets/lemonloader_asset_hash.txt"),
             "Legacy APK payload paths survived layout replacement.");
         AssertTrue(
-            archive.GetEntry("assets/LemonLoader/runtime/loader/Il2CppAssemblies/Game.dll") is not null,
-            "Interop assembly was not stored in the consolidated loader tree.");
+            archive.GetEntry("assets/LemonLoader/runtime/interop/Game.dll") is not null,
+            "Interop assembly was not stored in its independent runtime domain.");
         AssertTrue(
             archive.GetEntry("assets/LemonLoader/deployment/Mods/ExampleMod.dll") is not null,
             "Packaged Mod was not stored in the consolidated deployment tree.");
@@ -272,8 +287,50 @@ static Task TestApkPayloadLayoutReplacementAsync()
             ComputePayloadHash(archive, "runtime"),
             payloadDocument.RootElement.GetProperty("runtimeSha256").GetString());
         AssertEqual(
+            ComputePayloadHash(archive, "runtime/loader"),
+            payloadDocument.RootElement.GetProperty("loaderSha256").GetString());
+        AssertEqual(
+            ComputePayloadHash(archive, "runtime/dotnet"),
+            payloadDocument.RootElement.GetProperty("dotnetSha256").GetString());
+        AssertEqual(
+            ComputePayloadHash(archive, "runtime/interop"),
+            payloadDocument.RootElement.GetProperty("interopSha256").GetString());
+        AssertTrue(
+            archive.Entries.All(entry => !AndroidPayloadContract.IsForbiddenReleasePath(entry.FullName)),
+            "Loader Documentation leaked into the APK.");
+        AssertEqual(
             ComputePayloadHash(archive, "deployment"),
             payloadDocument.RootElement.GetProperty("deploymentSha256").GetString());
+        AssertEqual(
+            "production",
+            payloadDocument.RootElement.GetProperty("deploymentProfile").GetString());
+        var deploymentFileElements = payloadDocument.RootElement
+            .GetProperty("deploymentFiles")
+            .EnumerateArray()
+            .ToArray();
+        var deploymentFiles = deploymentFileElements
+            .ToDictionary(
+                item => item.GetProperty("path").GetString()!,
+                item => item.GetProperty("policy").GetString()!,
+                StringComparer.Ordinal);
+        AssertEqual("refresh", deploymentFiles["Mods/ExampleMod.dll"]);
+        AssertEqual("refresh", deploymentFiles["Plugins/ExamplePlugin.dll"]);
+        AssertEqual("refresh", deploymentFiles["UserLibs/SharedLibrary.dll"]);
+        AssertEqual("enforce", deploymentFiles["UserData/Fonts/font.ab"]);
+        AssertEqual("seed", deploymentFiles["Custom/fixture.bin"]);
+        AssertEqual(
+            ComputeDeploymentRevision(deploymentFileElements),
+            payloadDocument.RootElement.GetProperty("deploymentRevisionSha256").GetString());
+        foreach (var file in deploymentFileElements)
+        {
+            var path = file.GetProperty("path").GetString()!;
+            var entry = archive.GetEntry($"assets/LemonLoader/deployment/{path}")!;
+            using var input = entry.Open();
+            AssertEqual(entry.Length, file.GetProperty("size").GetInt64());
+            AssertEqual(
+                Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant(),
+                file.GetProperty("sha256").GetString());
+        }
 
         var invalidApkPath = Path.Combine(root, "invalid-casing.apk");
         CreateZip(invalidApkPath, new Dictionary<string, string>(StringComparer.Ordinal)
@@ -288,11 +345,107 @@ static Task TestApkPayloadLayoutReplacementAsync()
             releaseRoot,
             interopRoot,
             [new(invalidDeploymentRoot, "")]));
+
+        var collisionApkPath = Path.Combine(root, "deployment-collision.apk");
+        CreateZip(collisionApkPath, new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["lib/arm64-v8a/libmain.so"] = "game-main"
+        });
+        var collisionRoot = Path.Combine(root, "collision-deployment");
+        Directory.CreateDirectory(Path.Combine(collisionRoot, "Mods", "ExampleMod.dll"));
+        File.WriteAllText(
+            Path.Combine(collisionRoot, "Mods", "ExampleMod.dll", "child.txt"),
+            "child");
+        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+            collisionApkPath,
+            releaseRoot,
+            interopRoot,
+            [new(modPath, "Mods"), new(collisionRoot, "")]));
+
+        var reservedApkPath = Path.Combine(root, "reserved-deployment.apk");
+        CreateZip(reservedApkPath, new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["lib/arm64-v8a/libmain.so"] = "game-main"
+        });
+        var reservedRoot = Path.Combine(root, "reserved-deployment");
+        Directory.CreateDirectory(Path.Combine(reservedRoot, ".lemonloader-backups"));
+        File.WriteAllText(
+            Path.Combine(reservedRoot, ".lemonloader-backups", "payload.bin"),
+            "reserved");
+        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+            reservedApkPath,
+            releaseRoot,
+            interopRoot,
+            [new(reservedRoot, "")]));
+
+        var documentationApkPath = Path.Combine(root, "documentation.apk");
+        CreateZip(documentationApkPath, new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["lib/arm64-v8a/libmain.so"] = "game-main"
+        });
+        var documentationRelease = CreateReleaseTree(root);
+        WritePayload(
+            documentationRelease,
+            "assets/LemonLoader/runtime/loader/Documentation/README.md",
+            "desktop documentation");
+        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+            documentationApkPath,
+            documentationRelease,
+            interopRoot,
+            []));
     }
     finally
     {
         Directory.Delete(root, true);
     }
+    return Task.CompletedTask;
+}
+
+static Task TestDeploymentPolicyResolutionAsync()
+{
+    var development = DeploymentPolicyOptions.Create(null, []);
+    AssertEqual(DeploymentFilePolicy.Seed, development.Resolve("Mods/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Seed, development.Resolve("UserData/config.cfg"));
+    AssertEqual(DeploymentFilePolicy.Seed, development.Resolve("Future/file.bin"));
+
+    var production = DeploymentPolicyOptions.Create(
+        "production",
+        [
+            "Mods/**=upgrade",
+            "Mods/Optional/**=seed",
+            "Mods/Required.dll=enforce",
+            "Mods/A=B.dll=enforce",
+            "UserData/Managed/**=refresh"
+        ]);
+    AssertEqual(DeploymentFilePolicy.Upgrade, production.Resolve("Mods/Other.dll"));
+    AssertEqual(DeploymentFilePolicy.Seed, production.Resolve("Mods/Optional/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Enforce, production.Resolve("Mods/Required.dll"));
+    AssertEqual(DeploymentFilePolicy.Enforce, production.Resolve("Mods/A=B.dll"));
+    AssertEqual(
+        DeploymentFilePolicy.Refresh,
+        production.Resolve("UserData/Managed/font.ab"));
+    AssertEqual(DeploymentFilePolicy.Upgrade, production.Resolve("UserData/config.cfg"));
+    AssertEqual(DeploymentFilePolicy.Refresh, production.Resolve("Plugins/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Refresh, production.Resolve("UserLibs/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Seed, production.Resolve("Custom/file.bin"));
+
+    var locked = DeploymentPolicyOptions.Create("locked", []);
+    AssertEqual(DeploymentFilePolicy.Enforce, locked.Resolve("Plugins/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Enforce, locked.Resolve("Mods/Test.dll"));
+    AssertEqual(DeploymentFilePolicy.Upgrade, locked.Resolve("UserData/config.cfg"));
+    AssertEqual(DeploymentFilePolicy.Seed, locked.Resolve("Future/file.bin"));
+    AssertThrows<ArgumentException>(() =>
+        DeploymentPolicyOptions.Create("production", ["../Mods/**=refresh"]));
+    AssertThrows<ArgumentException>(() =>
+        DeploymentPolicyOptions.Create("production", ["Mods/*.dll=refresh"]));
+    AssertThrows<ArgumentException>(() =>
+        DeploymentPolicyOptions.Create("production", ["Mods//**=refresh"]));
+    AssertThrows<ArgumentException>(() =>
+        DeploymentPolicyOptions.Create("production", ["MelonLoader/**=enforce"]));
+    AssertThrows<ArgumentException>(() =>
+        DeploymentPolicyOptions.Create("production", ["Mods/**=refresh", "Mods\\**=seed"]));
+    AssertThrows<InvalidDataException>(() =>
+        production.ValidateRuleCoverage(["Mods/Other.dll"]));
     return Task.CompletedTask;
 }
 
@@ -389,7 +542,7 @@ static Task TestOptionParsingAsync()
         ["--apk", apk, "--output", Path.GetFullPath("mod.apk"), "--unknown", "value"]));
     AssertThrows<ArgumentException>(() => PatchOptions.Parse(
         ["--apk", apk, "--output", Path.GetFullPath("mod.apk"), "--keystore", "test.jks"]));
-    var deployment = PatchOptions.Parse(
+    var options = PatchOptions.Parse(
     [
         "--apk", apk,
         "--output", Path.GetFullPath("mod.apk"),
@@ -397,14 +550,24 @@ static Task TestOptionParsingAsync()
         "--mod", "ExampleMod.dll",
         "--plugin", "ExamplePlugin.dll",
         "--user-lib", "SharedLibrary.dll",
-        "--user-data", "UserData"
-    ]).DeploymentInputs;
+        "--user-data", "UserData",
+        "--deployment-profile", "production",
+        "--deployment-policy", "Mods/**=upgrade",
+        "--deployment-policy", "Mods/Required.dll=enforce"
+    ]);
+    var deployment = options.DeploymentInputs;
     AssertEqual(5, deployment.Count);
     AssertEqual("", deployment[0].TargetDirectory);
     AssertEqual("Mods", deployment[1].TargetDirectory);
     AssertEqual("Plugins", deployment[2].TargetDirectory);
     AssertEqual("UserLibs", deployment[3].TargetDirectory);
     AssertEqual("UserData", deployment[4].TargetDirectory);
+    AssertEqual(
+        DeploymentFilePolicy.Upgrade,
+        options.DeploymentPolicies.Resolve("Mods/Other.dll"));
+    AssertEqual(
+        DeploymentFilePolicy.Enforce,
+        options.DeploymentPolicies.Resolve("Mods/Required.dll"));
     return Task.CompletedTask;
 }
 
@@ -464,9 +627,15 @@ static string CreateReleaseTree(
         "assets/LemonLoader/payload.json",
         JsonSerializer.Serialize(new
         {
-            formatVersion = 4,
+            formatVersion = AndroidPayloadContract.FormatVersion,
             runtimeSha256 = new string('0', 64),
+            loaderSha256 = new string('0', 64),
+            dotnetSha256 = new string('0', 64),
+            interopSha256 = new string('0', 64),
             deploymentSha256 = new string('0', 64),
+            deploymentProfile = "development",
+            deploymentRevisionSha256 = ComputeDeploymentRevision([]),
+            deploymentFiles = Array.Empty<object>(),
             privateNativeLibraries = privateNativeLibraries ?? []
         }));
     return releaseRoot;
@@ -507,7 +676,11 @@ static string ReadZipEntry(ZipArchive archive, string name)
 
 static string ComputePayloadHash(ZipArchive archive, string scope)
 {
-    var lines = new List<string> { "layout-version=4", $"scope={scope}" };
+    var lines = new List<string>
+    {
+        $"layout-version={AndroidPayloadContract.FormatVersion}",
+        $"scope={scope}"
+    };
     foreach (var entry in archive.Entries
                  .Where(entry => !string.IsNullOrEmpty(entry.Name) &&
                                  entry.FullName.StartsWith(
@@ -531,7 +704,11 @@ static string ComputePayloadDirectoryHash(string releaseRoot, string scope)
     var files = Directory.Exists(scopeRoot)
         ? Directory.EnumerateFiles(scopeRoot, "*", SearchOption.AllDirectories)
         : Enumerable.Empty<string>();
-    var lines = new List<string> { "layout-version=4", $"scope={scope}" };
+    var lines = new List<string>
+    {
+        $"layout-version={AndroidPayloadContract.FormatVersion}",
+        $"scope={scope}"
+    };
     foreach (var path in files.OrderBy(
                  path => Path.GetRelativePath(payloadRoot, path).Replace('\\', '/'),
                  StringComparer.Ordinal))
@@ -541,6 +718,20 @@ static string ComputePayloadDirectoryHash(string releaseRoot, string scope)
         lines.Add(
             $"{relativePath}|{input.Length}|{Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant()}");
     }
+    return Convert.ToHexString(SHA256.HashData(
+        Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
+}
+
+static string ComputeDeploymentRevision(IEnumerable<JsonElement> files)
+{
+    var lines = new List<string> { "deployment-revision=1" };
+    lines.AddRange(files
+        .OrderBy(file => file.GetProperty("path").GetString(), StringComparer.Ordinal)
+        .Select(file =>
+            $"{file.GetProperty("path").GetString()}|" +
+            $"{file.GetProperty("size").GetInt64()}|" +
+            $"{file.GetProperty("sha256").GetString()}|" +
+            file.GetProperty("policy").GetString()));
     return Convert.ToHexString(SHA256.HashData(
         Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
 }
