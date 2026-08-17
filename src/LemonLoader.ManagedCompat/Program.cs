@@ -49,59 +49,6 @@ using var assembly = AssemblyDefinition.ReadAssembly(assemblyPath, new ReaderPar
     ReadSymbols = false
 });
 
-if (assembly.Name.Name == "Il2CppInterop.Runtime")
-{
-    if (assembly.Name.Version?.ToString() != "1.5.1.0")
-    {
-        Console.Error.WriteLine($"Unsupported managed assembly identity '{assembly.Name.FullName}'.");
-        return 3;
-    }
-
-    var androidNameReplacements = 0;
-    var androidModuleReferences = 0;
-    var injectorHelpers = assembly.MainModule.GetType("Il2CppInterop.Runtime.Injection.InjectorHelpers")
-        ?? throw new InvalidOperationException("Il2CppInterop InjectorHelpers was not found.");
-    foreach (var type in EnumerateTypes(injectorHelpers))
-    {
-        foreach (var method in type.Methods.Where(method => method.HasBody))
-        {
-            foreach (var instruction in method.Body.Instructions)
-            {
-                if (instruction.OpCode != OpCodes.Ldstr)
-                    continue;
-
-                if (string.Equals(instruction.Operand as string, "GameAssembly.so", StringComparison.Ordinal) ||
-                    string.Equals(instruction.Operand as string, "GameAssembly", StringComparison.Ordinal))
-                {
-                    instruction.Operand = "libil2cpp.so";
-                    androidNameReplacements++;
-                }
-                else if (string.Equals(instruction.Operand as string, "libil2cpp.so", StringComparison.Ordinal))
-                {
-                    androidModuleReferences++;
-                }
-            }
-        }
-    }
-
-    if (androidModuleReferences == 2 && androidNameReplacements is 0 or 2)
-    {
-        Console.WriteLine($"Il2CppInterop.Runtime already supports Android libil2cpp.so discovery: {assemblyPath}");
-        return 0;
-    }
-
-    if (androidNameReplacements != 2)
-    {
-        Console.Error.WriteLine(
-            $"Refusing to patch Il2CppInterop.Runtime: expected 2 Android library-name loads, found {androidNameReplacements}.");
-        return 4;
-    }
-
-    WriteAssembly(assembly, assemblyPath);
-    Console.WriteLine($"Patched Il2CppInterop.Runtime for Android libil2cpp.so discovery: {assemblyPath}");
-    return 0;
-}
-
 if (!supportedAssemblies.TryGetValue(assembly.Name.Name, out var target) ||
     assembly.Name.Version?.ToString() != target.Version)
 {

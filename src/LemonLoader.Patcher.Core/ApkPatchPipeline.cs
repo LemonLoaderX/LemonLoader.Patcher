@@ -469,10 +469,13 @@ public sealed class ApkPatchPipeline
         }
         var signing = request.Signing!;
         ReportStage("Signing and verifying APK");
-        await ProcessRunner.RunAsync(tools.ApkSigner, progress, cancellationToken,
-            "sign", "--ks", signing.KeystorePath, "--ks-key-alias", signing.KeyAlias,
-            "--ks-pass", $"pass:{signing.StorePassword}", "--key-pass", $"pass:{signing.KeyPassword ?? signing.StorePassword}",
-            "--v4-signing-enabled", "false", "--out", signed, aligned);
+        var signingInvocation = CreateSigningInvocation(signing, signed, aligned);
+        await ProcessRunner.RunAsync(
+            tools.ApkSigner,
+            progress,
+            cancellationToken,
+            signingInvocation.Environment,
+            signingInvocation.Arguments);
         await ProcessRunner.RunAsync(
             tools.ZipAlign,
             progress,
@@ -485,6 +488,35 @@ public sealed class ApkPatchPipeline
             "verify", "--verbose", signed);
         DirectoryPublisher.ReplaceFile(signed, request.OutputApkPath);
     }
+
+    internal static SigningInvocation CreateSigningInvocation(
+        SigningOptions signing,
+        string outputPath,
+        string inputPath)
+    {
+        const string storePasswordVariable = "LEMONLOADER_APKSIGNER_STORE_PASSWORD";
+        const string keyPasswordVariable = "LEMONLOADER_APKSIGNER_KEY_PASSWORD";
+        return new(
+            [
+                "sign",
+                "--ks", signing.KeystorePath,
+                "--ks-key-alias", signing.KeyAlias,
+                "--ks-pass", $"env:{storePasswordVariable}",
+                "--key-pass", $"env:{keyPasswordVariable}",
+                "--v4-signing-enabled", "false",
+                "--out", outputPath,
+                inputPath
+            ],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [storePasswordVariable] = signing.StorePassword,
+                [keyPasswordVariable] = signing.KeyPassword ?? signing.StorePassword
+            });
+    }
+
+    internal sealed record SigningInvocation(
+        string[] Arguments,
+        IReadOnlyDictionary<string, string> Environment);
 
     private static string? DetectUnityVersion(string path)
     {
@@ -618,6 +650,16 @@ internal static class ProcessRunner
         CancellationToken cancellationToken,
         params string[] arguments)
     {
+        await RunAsync(fileName, progress, cancellationToken, null, arguments);
+    }
+
+    public static async Task RunAsync(
+        string fileName,
+        IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment,
+        params string[] arguments)
+    {
         var info = new ProcessStartInfo(fileName)
         {
             UseShellExecute = false,
@@ -625,6 +667,11 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        if (environment is not null)
+        {
+            foreach (var pair in environment)
+                info.Environment[pair.Key] = pair.Value;
+        }
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
         progress?.Report(new(
             PatcherMessageKind.Stage,

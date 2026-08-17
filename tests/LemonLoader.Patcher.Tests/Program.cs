@@ -15,6 +15,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Deployment policy resolution", TestDeploymentPolicyResolutionAsync),
     ("Native library collision rejection", TestNativeLibraryCollisionAsync),
     ("Duplicate APK entry rejection", TestDuplicateApkEntryAsync),
+    ("Signing password isolation", TestSigningPasswordIsolationAsync),
     ("CLI contract", TestCliContractAsync),
     ("Directory replacement", TestDirectoryReplacementAsync)
 };
@@ -56,6 +57,31 @@ static Task TestInteropGeneratorGameAssemblyAsync()
     var optionIndex = Array.IndexOf(arguments, "--game-assembly");
     AssertTrue(optionIndex >= 0, "Interop generation must receive the game assembly.");
     AssertEqual(Path.Combine(input, "libil2cpp.so"), arguments[optionIndex + 1]);
+    return Task.CompletedTask;
+}
+
+static Task TestSigningPasswordIsolationAsync()
+{
+    const string storePassword = "store-secret";
+    const string keyPassword = "key-secret";
+    var invocation = ApkPatchPipeline.CreateSigningInvocation(
+        new SigningOptions("signing.jks", storePassword, "alias", keyPassword),
+        "signed.apk",
+        "aligned.apk");
+    AssertTrue(
+        invocation.Arguments.All(argument =>
+            !argument.Contains(storePassword, StringComparison.Ordinal) &&
+            !argument.Contains(keyPassword, StringComparison.Ordinal)),
+        "Signing passwords must not be placed on the process command line.");
+    AssertTrue(
+        invocation.Arguments.Contains("env:LEMONLOADER_APKSIGNER_STORE_PASSWORD"),
+        "The store password must be supplied through the child environment.");
+    AssertEqual(
+        storePassword,
+        invocation.Environment["LEMONLOADER_APKSIGNER_STORE_PASSWORD"]);
+    AssertEqual(
+        keyPassword,
+        invocation.Environment["LEMONLOADER_APKSIGNER_KEY_PASSWORD"]);
     return Task.CompletedTask;
 }
 
@@ -165,7 +191,11 @@ static Task TestReleaseValidationAsync()
         {
             WritePayload(root, "lib/arm64-v8a/libmain.so", "bootstrap"),
             WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/openssl/lemcrypto.so", "crypto"),
-            WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/openssl/lemssl.so", "ssl")
+            WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/openssl/lemssl.so", "ssl"),
+            WritePayload(
+                root,
+                "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
+                "coreclr")
         };
         files.Add(WritePayload(
             root,
@@ -182,22 +212,36 @@ static Task TestReleaseValidationAsync()
                 deploymentFiles = Array.Empty<object>(),
                 privateNativeLibraries = new[] { "lemcrypto.so", "lemssl.so" }
             })));
-        var manifest = new
+        var coreClrHash = files.Single(file => file.Path.EndsWith("/libcoreclr.so")).Hash;
+        var manifest = new Dictionary<string, object>
         {
-            formatVersion = 1,
-            assetLayoutVersion = AndroidPayloadContract.FormatVersion,
-            gameAssembliesIncluded = false,
-            files = files.Select(file => new
+            ["formatVersion"] = 1,
+            ["assetLayoutVersion"] = AndroidPayloadContract.FormatVersion,
+            ["gameAssembliesIncluded"] = false,
+            ["dotnetRuntimeVersion"] = "10.0.10",
+            ["dotnetRuntimeRevision"] = new string('1', 40),
+            ["coreClrSha256"] = coreClrHash,
+            ["files"] = files.Select(file => new
             {
                 path = file.Path,
                 size = file.Size,
                 sha256 = file.Hash
             })
         };
-        File.WriteAllText(
-            Path.Combine(root, "lemonloader-release.json"),
-            JsonSerializer.Serialize(manifest));
+        var manifestPath = Path.Combine(root, "lemonloader-release.json");
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
         ReleaseValidator.Validate(root);
+
+        manifest["coreClrSha256"] = new string('0', 64);
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
+        manifest["coreClrSha256"] = coreClrHash;
+
+        manifest["dotnetRuntimeRevision"] = "not-a-source-revision";
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
+        manifest["dotnetRuntimeRevision"] = new string('1', 40);
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
 
         var documentation = WritePayload(
             root,
@@ -629,6 +673,10 @@ static string CreateReleaseTree(
     WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
     WritePayload(releaseRoot, "assets/LemonLoader/runtime/loader/net6/MelonLoader.dll", "loader");
     WritePayload(releaseRoot, "assets/LemonLoader/runtime/dotnet/host/fxr/10.0.10/libhostfxr.so", "hostfxr");
+    WritePayload(
+        releaseRoot,
+        "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
+        "coreclr");
     foreach (var library in privateNativeLibraries ?? [])
         WritePayload(
             releaseRoot,

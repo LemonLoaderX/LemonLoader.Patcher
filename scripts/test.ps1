@@ -28,8 +28,6 @@ $fixtures = [ordered]@{
         "monomod.utils\22.7.31.1\lib\net5.0\MonoMod.Utils.dll"
     "0Harmony.dll" = Join-Path $nugetRoot `
         "harmonyx\2.10.2\lib\netstandard2.0\0Harmony.dll"
-    "Il2CppInterop.Runtime.dll" = Join-Path $nugetRoot `
-        "il2cppinterop.runtime\1.5.1\lib\net6.0\Il2CppInterop.Runtime.dll"
 }
 
 foreach ($fixture in $fixtures.GetEnumerator()) {

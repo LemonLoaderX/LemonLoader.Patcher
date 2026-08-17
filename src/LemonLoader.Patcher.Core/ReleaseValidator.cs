@@ -70,11 +70,37 @@ internal static class ReleaseValidator
                 $"Unexpected: [{string.Join(", ", unexpected)}]; missing: [{string.Join(", ", missing)}].");
         }
 
-        ValidateAndroidLayout(root, actualFiles);
+        ValidateAndroidLayout(root, actualFiles, manifest);
     }
 
-    private static void ValidateAndroidLayout(string root, IReadOnlySet<string> files)
+    private static void ValidateAndroidLayout(
+        string root,
+        IReadOnlySet<string> files,
+        JsonElement releaseManifest)
     {
+        var runtimeVersion = releaseManifest.GetProperty("dotnetRuntimeVersion").GetString();
+        var runtimeRevision = releaseManifest.GetProperty("dotnetRuntimeRevision").GetString();
+        var coreClrHash = releaseManifest.GetProperty("coreClrSha256").GetString();
+        if (string.IsNullOrWhiteSpace(runtimeVersion) ||
+            runtimeRevision is null || runtimeRevision.Length != 40 ||
+            runtimeRevision.Any(character => !Uri.IsHexDigit(character)) ||
+            coreClrHash is null || coreClrHash.Length != 64 ||
+            coreClrHash.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new InvalidDataException("The Release does not contain valid CoreCLR source provenance.");
+        }
+        var coreClrPath = $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libcoreclr.so";
+        if (!files.Contains(coreClrPath))
+            throw new InvalidDataException("The Release CoreCLR file is missing.");
+        using (var input = File.OpenRead(Path.Combine(
+                   root,
+                   coreClrPath.Replace('/', Path.DirectorySeparatorChar))))
+        {
+            var actualCoreClrHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            if (!string.Equals(coreClrHash, actualCoreClrHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The Release CoreCLR hash does not match its source provenance.");
+        }
+
         var invalidAsset = files.FirstOrDefault(path =>
             path.StartsWith("assets/", StringComparison.Ordinal) &&
             !path.StartsWith("assets/LemonLoader/", StringComparison.Ordinal));
