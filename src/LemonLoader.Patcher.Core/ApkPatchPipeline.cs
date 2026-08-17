@@ -243,7 +243,6 @@ public sealed class ApkPatchPipeline
         deploymentPolicies.ValidateRuleCoverage(deploymentFiles.Select(file => file.Path));
         var updated = descriptor with
         {
-            RuntimeSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime"),
             LoaderSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/loader"),
             DotnetSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/dotnet"),
             InteropSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/interop"),
@@ -311,10 +310,9 @@ public sealed class ApkPatchPipeline
 
     private sealed record PayloadDescriptor(
         int FormatVersion,
-        string RuntimeSha256,
-        string? LoaderSha256,
-        string? DotnetSha256,
-        string? InteropSha256,
+        string LoaderSha256,
+        string DotnetSha256,
+        string InteropSha256,
         string DeploymentSha256,
         string DeploymentProfile,
         string DeploymentRevisionSha256,
@@ -368,6 +366,18 @@ public sealed class ApkPatchPipeline
         {
             throw new InvalidDataException(
                 $"Android payload must not contain loader documentation '{forbidden.FullName}'.");
+        }
+
+        var unsupported = archive.Entries.FirstOrDefault(entry =>
+            !string.IsNullOrEmpty(entry.Name) &&
+            entry.FullName.StartsWith(
+                $"{AndroidPayloadContract.PayloadRoot}/runtime/",
+                StringComparison.Ordinal) &&
+            !AndroidPayloadContract.IsRuntimeDomainPath(entry.FullName));
+        if (unsupported is not null)
+        {
+            throw new InvalidDataException(
+                $"Android runtime entry '{unsupported.FullName}' is outside a supported update domain.");
         }
     }
 

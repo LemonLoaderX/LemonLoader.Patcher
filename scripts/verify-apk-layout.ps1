@@ -182,11 +182,9 @@ try {
     finally {
         $reader.Dispose()
     }
-    if ($payload.formatVersion -ne 5) {
+    if ($payload.formatVersion -ne 7) {
         throw "APK payload.json has unsupported format '$($payload.formatVersion)'."
     }
-    $runtimeHash = Get-PayloadTreeHash -Archive $archive -Scope "runtime" `
-        -LayoutVersion $payload.formatVersion
     $loaderHash = Get-PayloadTreeHash -Archive $archive -Scope "runtime/loader" `
         -LayoutVersion $payload.formatVersion
     $dotnetHash = Get-PayloadTreeHash -Archive $archive -Scope "runtime/dotnet" `
@@ -195,9 +193,6 @@ try {
         -LayoutVersion $payload.formatVersion
     $deploymentHash = Get-PayloadTreeHash -Archive $archive -Scope "deployment" `
         -LayoutVersion $payload.formatVersion
-    if ($payload.runtimeSha256 -cne $runtimeHash) {
-        throw "APK runtime hash is '$($payload.runtimeSha256)', expected '$runtimeHash'."
-    }
     if ($payload.deploymentSha256 -cne $deploymentHash) {
         throw "APK deployment hash is '$($payload.deploymentSha256)', expected '$deploymentHash'."
     }
@@ -208,6 +203,18 @@ try {
         if ($payload.($domain.Property) -cne $domain.Hash) {
             throw "APK $($domain.Name) hash is '$($payload.($domain.Property))', expected '$($domain.Hash)'."
         }
+    }
+    $unsupportedRuntimeEntry = $archive.Entries |
+        Where-Object {
+            -not [string]::IsNullOrEmpty($_.Name) -and
+            $_.FullName.StartsWith("assets/LemonLoader/runtime/", [StringComparison]::Ordinal) -and
+            -not ($_.FullName.StartsWith("assets/LemonLoader/runtime/loader/", [StringComparison]::Ordinal) -or
+                $_.FullName.StartsWith("assets/LemonLoader/runtime/dotnet/", [StringComparison]::Ordinal) -or
+                $_.FullName.StartsWith("assets/LemonLoader/runtime/interop/", [StringComparison]::Ordinal))
+        } |
+        Select-Object -First 1
+    if ($null -ne $unsupportedRuntimeEntry) {
+        throw "APK runtime entry '$($unsupportedRuntimeEntry.FullName)' is outside a supported update domain."
     }
     if ($payload.deploymentProfile -notin @("development", "production", "locked")) {
         throw "APK deployment profile '$($payload.deploymentProfile)' is invalid."
@@ -298,12 +305,11 @@ try {
         throw "APK contains no generated Interop assemblies."
     }
 
-    Write-Host "Verified LemonLoader APK layout v5:"
+    Write-Host "Verified LemonLoader APK layout v7:"
     Write-Host "  $apk"
     Write-Host "  Interop assemblies: $interopCount"
     Write-Host "  Expected deployment files: $($expectedDeploymentFiles.Count)"
     Write-Host "  Deployment profile: $($payload.deploymentProfile)"
-    Write-Host "  Runtime SHA-256: $runtimeHash"
     Write-Host "  Loader SHA-256: $loaderHash"
     Write-Host "  Dotnet SHA-256: $dotnetHash"
     Write-Host "  Interop SHA-256: $interopHash"

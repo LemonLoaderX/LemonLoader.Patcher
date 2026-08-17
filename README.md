@@ -103,9 +103,10 @@ output. A bundled `LemonLoader-Android-arm64.zip` is placed beside `CLI` and
 artifacts such as `.cpp2il`, `.tools`, and `Il2CppAssemblies` are rejected from
 published output.
 
-The current Release contract is asset layout v5 with
+The current Release contract is asset layout v7 with
 `assets/LemonLoader/payload.json`. Runtime loader, dotnet, Interop, and packaged
-deployment content use independent hashes. `runtime/loader/Documentation` is
-not valid Android payload content. Native entry replacement is limited to
-`libmain.so`; private .NET native dependencies remain isolated from game-owned
-libraries.
+deployment content use independent hashes. Release and APK validation hash their
+complete contents; normal device startup trusts the installed domain marker and
+does not rescan the private runtime. `runtime/loader/Documentation` is not valid
+Android payload content. Native entry replacement is limited to `libmain.so`;
+private .NET native dependencies remain isolated from game-owned libraries.

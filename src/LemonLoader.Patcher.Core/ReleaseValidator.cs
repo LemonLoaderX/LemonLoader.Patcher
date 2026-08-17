@@ -100,17 +100,23 @@ internal static class ReleaseValidator
         var payload = payloadDocument.RootElement;
         if (payload.GetProperty("formatVersion").GetInt32() != AssetLayoutVersion)
             throw new InvalidDataException("The Android payload manifest has an unsupported format version.");
-        foreach (var propertyName in new[] { "runtimeSha256", "deploymentSha256" })
+        var deploymentHash = payload.GetProperty("deploymentSha256").GetString();
+        var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(root, "deployment");
+        if (deploymentHash is null || deploymentHash.Length != 64 ||
+            deploymentHash.Any(character => !Uri.IsHexDigit(character)) ||
+            !string.Equals(deploymentHash, actualDeploymentHash, StringComparison.OrdinalIgnoreCase))
         {
-            var hash = payload.GetProperty(propertyName).GetString();
-            if (hash is null || hash.Length != 64 || hash.Any(character => !Uri.IsHexDigit(character)))
-                throw new InvalidDataException($"The Android payload manifest property '{propertyName}' is not SHA-256.");
-            var scope = propertyName == "runtimeSha256" ? "runtime" : "deployment";
-            var actualHash = AndroidPayloadContract.ComputeTreeHash(root, scope);
-            if (!string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException(
-                    $"The Android payload manifest hash for '{scope}' does not match its files.");
+            throw new InvalidDataException(
+                "The Android payload manifest hash for 'deployment' is invalid.");
         }
+
+        var invalidRuntimePath = files.FirstOrDefault(path =>
+            path.StartsWith($"{AndroidPayloadContract.PayloadRoot}/runtime/", StringComparison.Ordinal) &&
+            !AndroidPayloadContract.IsRuntimeDomainPath(path));
+        if (invalidRuntimePath is not null)
+            throw new InvalidDataException(
+                $"Android runtime file '{invalidRuntimePath}' is outside a supported update domain.");
+
         foreach (var domain in new[]
                  {
                      (Property: "loaderSha256", Scope: "runtime/loader"),
@@ -118,8 +124,7 @@ internal static class ReleaseValidator
                      (Property: "interopSha256", Scope: "runtime/interop")
                  })
         {
-            if (!payload.TryGetProperty(domain.Property, out var property))
-                continue;
+            var property = payload.GetProperty(domain.Property);
             var hash = property.GetString();
             var actualHash = AndroidPayloadContract.ComputeTreeHash(root, domain.Scope);
             if (hash is null || hash.Length != 64 ||

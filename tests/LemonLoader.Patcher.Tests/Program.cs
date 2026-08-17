@@ -173,7 +173,9 @@ static Task TestReleaseValidationAsync()
             JsonSerializer.Serialize(new
             {
                 formatVersion = AndroidPayloadContract.FormatVersion,
-                runtimeSha256 = ComputePayloadDirectoryHash(root, "runtime"),
+                loaderSha256 = ComputePayloadDirectoryHash(root, "runtime/loader"),
+                dotnetSha256 = ComputePayloadDirectoryHash(root, "runtime/dotnet"),
+                interopSha256 = ComputePayloadDirectoryHash(root, "runtime/interop"),
                 deploymentSha256 = ComputePayloadDirectoryHash(root, "deployment"),
                 deploymentProfile = "development",
                 deploymentRevisionSha256 = ComputeDeploymentRevision([]),
@@ -275,9 +277,6 @@ static Task TestApkPayloadLayoutAsync()
         using var payloadDocument = JsonDocument.Parse(
             ReadZipEntry(archive, "assets/LemonLoader/payload.json"));
         AssertEqual(
-            ComputePayloadHash(archive, "runtime"),
-            payloadDocument.RootElement.GetProperty("runtimeSha256").GetString());
-        AssertEqual(
             ComputePayloadHash(archive, "runtime/loader"),
             payloadDocument.RootElement.GetProperty("loaderSha256").GetString());
         AssertEqual(
@@ -286,6 +285,10 @@ static Task TestApkPayloadLayoutAsync()
         AssertEqual(
             ComputePayloadHash(archive, "runtime/interop"),
             payloadDocument.RootElement.GetProperty("interopSha256").GetString());
+        AssertTrue(
+            !payloadDocument.RootElement.TryGetProperty("runtimeSha256", out _) &&
+            !payloadDocument.RootElement.TryGetProperty("runtimeFiles", out _),
+            "The APK retained the obsolete aggregate runtime manifest.");
         AssertTrue(
             archive.Entries.All(entry => !AndroidPayloadContract.IsForbiddenReleasePath(entry.FullName)),
             "Loader Documentation leaked into the APK.");
@@ -637,7 +640,6 @@ static string CreateReleaseTree(
         JsonSerializer.Serialize(new
         {
             formatVersion = AndroidPayloadContract.FormatVersion,
-            runtimeSha256 = new string('0', 64),
             loaderSha256 = new string('0', 64),
             dotnetSha256 = new string('0', 64),
             interopSha256 = new string('0', 64),

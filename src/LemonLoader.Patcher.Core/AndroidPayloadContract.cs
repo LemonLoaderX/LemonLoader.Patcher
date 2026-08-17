@@ -4,7 +4,7 @@ using System.Text;
 
 internal static class AndroidPayloadContract
 {
-    public const int FormatVersion = 5;
+    public const int FormatVersion = 7;
     public const string PayloadRoot = "assets/LemonLoader";
     public const string LoaderRoot = $"{PayloadRoot}/runtime/loader";
     public const string DotnetRoot = $"{PayloadRoot}/runtime/dotnet";
@@ -72,6 +72,11 @@ internal static class AndroidPayloadContract
 
     public static bool IsForbiddenReleasePath(string path) =>
         path.StartsWith($"{LoaderRoot}/Documentation/", StringComparison.Ordinal);
+
+    public static bool IsRuntimeDomainPath(string path) =>
+        path.StartsWith($"{LoaderRoot}/", StringComparison.Ordinal) ||
+        path.StartsWith($"{DotnetRoot}/", StringComparison.Ordinal) ||
+        path.StartsWith($"{InteropRoot}/", StringComparison.Ordinal);
 
     private static string HashLines(IEnumerable<string> lines) =>
         Convert.ToHexString(SHA256.HashData(
