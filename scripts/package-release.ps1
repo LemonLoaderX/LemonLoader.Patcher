@@ -11,6 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+Add-Type -AssemblyName System.Formats.Tar
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $releaseRoot = Join-Path $repositoryRoot "Output\Releases"
@@ -71,7 +72,7 @@ function Assert-Zip([string]$Path, [string]$RuntimeIdentifier) {
     try {
         $entries = $archive.Entries |
             Where-Object { -not [string]::IsNullOrEmpty($_.Name) } |
-            ForEach-Object { $_.FullName.Replace('\\', '/') }
+            ForEach-Object { $_.FullName.Replace('\', '/') }
         foreach ($required in Get-RequiredEntries $RuntimeIdentifier) {
             if ($required -cnotin $entries) {
                 throw "Archive '$Path' is missing '$required'."
@@ -80,6 +81,106 @@ function Assert-Zip([string]$Path, [string]$RuntimeIdentifier) {
     }
     finally {
         $archive.Dispose()
+    }
+}
+
+function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
+    $regularMode = [System.IO.UnixFileMode](
+        [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite -bor
+        [System.IO.UnixFileMode]::GroupRead -bor [System.IO.UnixFileMode]::OtherRead)
+    $executableMode = [System.IO.UnixFileMode](
+        $regularMode -bor [System.IO.UnixFileMode]::UserExecute -bor
+        [System.IO.UnixFileMode]::GroupExecute -bor [System.IO.UnixFileMode]::OtherExecute)
+    $executables = [Collections.Generic.HashSet[string]]::new(
+        [string[]]@(
+            "CLI/LemonLoader.Patcher.CLI",
+            "GUI/LemonLoader.Patcher.GUI"),
+        [StringComparer]::Ordinal)
+    $timestamp = [DateTimeOffset]::new(2020, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+
+    $fileOutput = [IO.File]::Create($Destination)
+    try {
+        $gzip = [IO.Compression.GZipStream]::new(
+            $fileOutput,
+            [IO.Compression.CompressionLevel]::Optimal,
+            $true)
+        try {
+            $writer = [System.Formats.Tar.TarWriter]::new(
+                $gzip,
+                [System.Formats.Tar.TarEntryFormat]::Pax,
+                $true)
+            try {
+                foreach ($path in Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Force |
+                             Sort-Object {
+                                 [IO.Path]::GetRelativePath($SourceRoot, $_.FullName).Replace('\', '/')
+                             }) {
+                    $relativePath = [IO.Path]::GetRelativePath(
+                        $SourceRoot,
+                        $path.FullName).Replace('\', '/')
+                    $entry = [System.Formats.Tar.PaxTarEntry]::new(
+                        [System.Formats.Tar.TarEntryType]::RegularFile,
+                        $relativePath)
+                    $entry.Mode = if ($executables.Contains($relativePath)) {
+                        $executableMode
+                    }
+                    else {
+                        $regularMode
+                    }
+                    $entry.ModificationTime = $timestamp
+                    $entry.Uid = 0
+                    $entry.Gid = 0
+                    $entry.UserName = "root"
+                    $entry.GroupName = "root"
+                    $input = [IO.File]::OpenRead($path.FullName)
+                    try {
+                        $entry.DataStream = $input
+                        $writer.WriteEntry($entry)
+                    }
+                    finally {
+                        $input.Dispose()
+                    }
+                }
+            }
+            finally {
+                $writer.Dispose()
+            }
+        }
+        finally {
+            $gzip.Dispose()
+        }
+    }
+    finally {
+        $fileOutput.Dispose()
+    }
+}
+
+function Read-LinuxArchive([string]$Path) {
+    $fileInput = [IO.File]::OpenRead($Path)
+    try {
+        $gzip = [IO.Compression.GZipStream]::new(
+            $fileInput,
+            [IO.Compression.CompressionMode]::Decompress,
+            $true)
+        try {
+            $reader = [System.Formats.Tar.TarReader]::new($gzip, $true)
+            try {
+                while ($null -ne ($entry = $reader.GetNextEntry($false))) {
+                    [pscustomobject]@{
+                        Name = $entry.Name.Replace('\', '/')
+                        Mode = $entry.Mode
+                    }
+                }
+            }
+            finally {
+                $reader.Dispose()
+            }
+        }
+        finally {
+            $gzip.Dispose()
+        }
+    }
+    finally {
+        $fileInput.Dispose()
     }
 }
 
@@ -104,19 +205,21 @@ try {
         }
         else {
             $asset = Join-Path $packageRoot "LemonLoader.Patcher-linux-x64.tar.gz"
-            & tar -C $runtimeRoot -czf $asset .
-            if ($LASTEXITCODE -ne 0) {
-                throw "Creating the Linux release archive failed with exit code $LASTEXITCODE."
-            }
-            $entries = @(& tar -tzf $asset) |
-                ForEach-Object { $_.TrimStart('.', '/').Replace('\\', '/') } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-            if ($LASTEXITCODE -ne 0) {
-                throw "Reading the Linux release archive failed with exit code $LASTEXITCODE."
-            }
+            New-LinuxArchive -SourceRoot $runtimeRoot -Destination $asset
+            $archiveEntries = @(Read-LinuxArchive -Path $asset)
+            $entries = @($archiveEntries | ForEach-Object Name)
             foreach ($required in Get-RequiredEntries $runtimeIdentifier) {
                 if ($required -cnotin $entries) {
                     throw "Archive '$asset' is missing '$required'."
+                }
+            }
+            foreach ($executable in @(
+                "CLI/LemonLoader.Patcher.CLI",
+                "GUI/LemonLoader.Patcher.GUI")) {
+                $entry = $archiveEntries | Where-Object Name -CEQ $executable
+                if ($null -eq $entry -or
+                    ($entry.Mode -band [System.IO.UnixFileMode]::UserExecute) -eq 0) {
+                    throw "Archive '$asset' does not mark '$executable' executable."
                 }
             }
         }
@@ -130,7 +233,10 @@ try {
             $hash = (Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $([IO.Path]::GetFileName($_))"
         }
-    Set-Content -LiteralPath $checksumPath -Value $checksumLines -Encoding Ascii
+    [IO.File]::WriteAllText(
+        $checksumPath,
+        ($checksumLines -join "`n") + "`n",
+        [Text.Encoding]::ASCII)
     $assets.Add($checksumPath)
 
     Write-Host "Packaged LemonLoader.Patcher $Version release assets:"
