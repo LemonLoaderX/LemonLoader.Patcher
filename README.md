@@ -1,14 +1,16 @@
 # LemonLoader Patcher
 
-Cross-platform CLI and Avalonia GUI for producing LemonLoader-enabled Android
-ARM64 IL2CPP APKs. Both front ends call the same typed patch pipeline; the GUI
-does not shell out to or emulate the CLI.
+Cross-platform CLI and Avalonia GUI for injecting LemonLoader into Android ARM64
+IL2CPP APKs or unpacked APK directories. Both front ends call the same typed
+patch pipeline; the GUI does not shell out to or emulate the CLI.
 
-The Patcher works directly with ZIP entries, generates game-specific Interop
-assemblies, restores the matching Unity managed references, merges the current
-LemonLoader Release and deployment tree, zipaligns the result for 16 KiB pages,
-and optionally signs it. Use an original game APK as input. An APK that already
-contains a loader payload is rejected rather than migrated.
+For APK input, Patcher works directly with ZIP entries; directory input is
+updated in place without copying the original tree. It generates game-specific
+Interop assemblies, restores the matching Unity managed references, and merges
+the current LemonLoader Release and deployment tree. APK alignment and signing
+are explicit, independent post-processing operations; the core patch does not
+require an Android SDK. An input that already contains a loader payload is
+rejected rather than migrated.
 
 ## CLI
 
@@ -20,17 +22,19 @@ contract installed with the current version.
 
 ```text
 LemonLoader.Patcher.CLI patch <input.apk> --output <output.apk> [options]
+LemonLoader.Patcher.CLI patch <input-directory> [options]
 ```
 
-`<input.apk>` and `--output` are the only unconditional inputs. The input must
-be an original ARM64 Unity IL2CPP APK and is never modified in place.
+`<input>` is the only unconditional input. An APK input requires `--output` and
+is never modified in place. An unpacked directory is modified directly and must
+not be given `--output`.
 
 #### Required inputs
 
 | Input | Description |
 | --- | --- |
-| `<input.apk>` | Positional path to the original APK. Already-patched APKs are rejected. |
-| `--output <path>` | Destination APK. It must not resolve to the input path. |
+| `<input>` | Positional path to the original APK or unpacked APK directory. Already-patched inputs are rejected. |
+| `--output <path>` | Required for APK input only. Destination APK; it must not resolve to the input path. |
 
 #### Payload options
 
@@ -57,18 +61,22 @@ uses the fixed Il2CppInterop generator bundled with Patcher.
 | `--cpp2il <path>` | Uses a specific Cpp2IL executable instead of the pinned verified download. |
 | `--il2cppinterop-cli <path>` | Development override for a built `Il2CppInterop.CLI.dll`. Its adjacent dependencies must remain beside it. Normal releases should omit this option. |
 
-#### Android and signing options
+#### APK post-processing options
 
 | Option | Required | Description and default |
 | --- | --- | --- |
-| `--sdk <directory>` | No | Android SDK root. When omitted, Patcher uses `ANDROID_SDK_ROOT`, then `ANDROID_HOME`. One of these sources must resolve to SDK build-tools. |
-| `--keystore <path>` | No | Signs the aligned APK with this keystore. Without it, the result is aligned but unsigned. |
+| `--align` | No | Requests 16 KiB APK ZIP alignment. Without it, the patched APK is published without running `zipalign`. |
+| `--zipalign <path>` | With `--align` only | Explicit `zipalign` executable. When omitted, Patcher searches `PATH`. Supplying it without `--align` is an error. |
+| `--keystore <path>` | No | Requests APK signing with this keystore. Signing does not implicitly request alignment. |
 | `--key-alias <name>` | With `--keystore` | Alias of the signing key. Supplying it without `--keystore` is an error. |
+| `--apksigner <path>` | With `--keystore` only | Explicit `apksigner` executable or script. When omitted, Patcher searches `PATH`. Supplying it without `--keystore` is an error. |
 
 Signing passwords are not command-line parameters. Set
 `LEMONLOADER_KEYSTORE_PASSWORD`; optionally set `LEMONLOADER_KEY_PASSWORD` when
 the key password differs. Patcher passes them only through the `apksigner` child
-environment.
+environment. If alignment or signing is requested and its tool cannot be found,
+the operation fails before publishing the output. Directory input rejects every
+APK post-processing option.
 
 #### Global options
 
@@ -85,8 +93,14 @@ detection:
 
 ```powershell
 CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
-    --output game-lemonloader.apk `
-    --sdk D:\Develop\Android\SDK
+    --output game-lemonloader.apk
+```
+
+Patch an unpacked directory directly. No output directory is copied or created:
+
+```powershell
+CLI\LemonLoader.Patcher.CLI.exe patch UnpackedGame `
+    --release LemonLoader-Android-arm64.zip
 ```
 
 Patch with Mods and persistent UserData using the `production` profile:
@@ -105,8 +119,7 @@ CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --output game-lemonloader.apk `
     --deployment Deployment `
     --profile production `
-    --policy "UserData/ExampleMod/defaults.cfg=upgrade" `
-    --sdk D:\Develop\Android\SDK
+    --policy "UserData/ExampleMod/defaults.cfg=upgrade"
 ```
 
 Offline patch with explicit Release, Unity references, and a published Interop
@@ -118,20 +131,31 @@ CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --release LemonLoader-Android-arm64.zip `
     --unity-version 6000.3.8f1 `
     --unity-libraries UnityDependencies `
-    --interop-output GeneratedInterop `
-    --sdk D:\Develop\Android\SDK
+    --interop-output GeneratedInterop
 ```
 
-Signed output:
+Aligned and signed output using tools discovered on `PATH`:
 
 ```powershell
 $env:LEMONLOADER_KEYSTORE_PASSWORD = "<store-password>"
 $env:LEMONLOADER_KEY_PASSWORD = "<key-password>" # Optional
 CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --output game-lemonloader.apk `
-    --sdk D:\Develop\Android\SDK `
+    --align `
     --keystore signing.jks `
     --key-alias release
+```
+
+Tool paths can instead be supplied explicitly:
+
+```powershell
+CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
+    --output game-lemonloader.apk `
+    --align `
+    --zipalign D:\Android\build-tools\zipalign.exe `
+    --keystore signing.jks `
+    --key-alias release `
+    --apksigner D:\Android\build-tools\apksigner.bat
 ```
 
 ### Deployment behavior
@@ -202,6 +226,9 @@ sha256: <sha256>
 unity-version: 6000.3.8f1
 ```
 
+Directory mode reports the modified input path as `output` and omits `sha256`,
+because it does not create a separate APK artifact.
+
 Exit codes are `0` for success, `1` for execution failure, `2` for invalid
 usage, and `130` for cancellation.
 
@@ -220,11 +247,12 @@ Use `--release <path>` for an explicit local or offline build.
 ## GUI
 
 Start `GUI/LemonLoader.Patcher.GUI.exe` on Windows or
-`GUI/LemonLoader.Patcher.GUI` on Linux. The GUI exposes APK patching and Unity
-dependency restoration as separate workspaces. Common inputs stay in the main
-form; Interop overrides and signing are grouped under advanced sections. Paths
-use native file and directory pickers, operations can be cancelled, and
-pipeline/tool output is shown in the task log.
+`GUI/LemonLoader.Patcher.GUI` on Linux. The GUI accepts either an APK or unpacked
+directory and exposes Unity dependency restoration as a separate workspace.
+Selecting a directory disables output, alignment, and signing controls because
+the directory is patched in place. APK alignment and signing are grouped under
+the optional post-processing section. Paths use native pickers, operations can
+be cancelled, and pipeline/tool output is shown in the task log.
 
 For source builds, the Avalonia project and assembly are named
 `LemonLoader.Patcher.GUI`:
@@ -233,6 +261,22 @@ For source builds, the Avalonia project and assembly are named
 dotnet run --project src/LemonLoader.Patcher.GUI
 ```
 
+## Source layout
+
+`LemonLoader.Patcher.Core` keeps the public patch interface small while the
+implementation is divided by responsibility:
+
+- `ApkPatchPipeline` coordinates one patch run and owns temporary workspace cleanup.
+- `GameInteropGenerator` reads either input form and produces verified game Interop.
+- `PayloadAssembler` builds the canonical payload for both APK and directory targets.
+- `DirectoryInjector` applies directory overlays transactionally with rollback.
+- `ApkPostProcessor` performs only explicitly requested alignment and signing.
+- `ProcessRunner` and the resolver modules contain bounded external tool execution.
+
+The CLI parser and application runner are separate modules. The GUI code-behind is
+split into operation, request, picker, and logging partials; neither front end
+duplicates Core patch behavior.
+
 ## Build and publish
 
 ```powershell
@@ -240,6 +284,7 @@ pwsh -NoProfile -File scripts/test.ps1
 pwsh -NoProfile -File scripts/publish.ps1 `
   -Runtime win-x64 `
   -Il2CppInteropSourceRoot ..\dependencies\Il2CppInterop
+pwsh -NoProfile -File scripts/package-release.ps1 -Version v1.0.0
 ```
 
 Stable outputs use the same acronym casing as the products:
@@ -251,6 +296,9 @@ Output/Releases/win-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
 Output/Releases/linux-x64/CLI/LemonLoader.Patcher.CLI
 Output/Releases/linux-x64/GUI/LemonLoader.Patcher.GUI
 Output/Releases/linux-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
+Output/Packages/v1.0.0/LemonLoader.Patcher-win-x64.zip
+Output/Packages/v1.0.0/LemonLoader.Patcher-linux-x64.tar.gz
+Output/Packages/v1.0.0/SHA256SUMS.txt
 ```
 
 Publishing uses a fresh staging directory and atomically replaces the runtime

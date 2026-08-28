@@ -22,7 +22,7 @@
 
     <Grid Grid.Row="1" ColumnDefinitions="3*,2*" ColumnSpacing="0">
       <TabControl x:Name="WorkspaceTabs" Margin="20,16,12,16">
-        <TabItem Header="Patch APK">
+        <TabItem Header="Patch">
           <ScrollViewer Margin="0,14,8,0"
                         HorizontalScrollBarVisibility="Disabled"
                         VerticalScrollBarVisibility="Auto"
@@ -30,16 +30,21 @@
             <StackPanel Margin="0,0,8,0" Spacing="18">
               <StackPanel Spacing="10">
                 <TextBlock Text="Package" Classes="section-title" />
-                <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
+                <Grid ColumnDefinitions="132,*,36,36" RowDefinitions="Auto,Auto,Auto"
                       ColumnSpacing="8" RowSpacing="8">
-                  <TextBlock Text="Input APK" Classes="field-label" />
-                  <TextBox x:Name="InputApkPath" Grid.Column="1"
+                  <TextBlock Text="Input" Classes="field-label" />
+                  <TextBox x:Name="InputPath" Grid.Column="1"
                            Classes="single-line"
-                           Watermark="Select the original game APK" />
+                           TextChanged="InputPathChanged"
+                           Watermark="Original APK or unpacked directory" />
                   <Button Grid.Column="2" Content="⋯" Classes="browse"
-                          Tag="InputApkPath" Click="BrowseFileClick"
+                          Tag="InputPath" Click="BrowseFileClick"
                           AutomationProperties.Name="Choose input APK"
                           ToolTip.Tip="Choose input APK" />
+                  <Button Grid.Column="3" Content="⌂" Classes="browse"
+                          Click="BrowseInputDirectoryClick"
+                          AutomationProperties.Name="Choose unpacked input directory"
+                          ToolTip.Tip="Choose unpacked input directory" />
 
                   <TextBlock Grid.Row="1" Text="LemonLoader Release" Classes="field-label" />
                   <TextBox x:Name="ReleasePath" Grid.Row="1" Grid.Column="1"
@@ -50,11 +55,11 @@
                           AutomationProperties.Name="Choose LemonLoader Release"
                           ToolTip.Tip="Choose LemonLoader Release" />
 
-                  <TextBlock Grid.Row="2" Text="Output APK" Classes="field-label" />
+                  <TextBlock x:Name="OutputApkLabel" Grid.Row="2" Text="Output APK" Classes="field-label" />
                   <TextBox x:Name="OutputApkPath" Grid.Row="2" Grid.Column="1"
                            Classes="single-line"
                            Watermark="Choose where to write the patched APK" />
-                  <Button Grid.Row="2" Grid.Column="2" Content="⋯" Classes="browse"
+                  <Button x:Name="OutputApkBrowseButton" Grid.Row="2" Grid.Column="2" Content="⋯" Classes="browse"
                           Click="BrowseOutputApkClick"
                           AutomationProperties.Name="Choose output APK"
                           ToolTip.Tip="Choose output APK" />
@@ -175,26 +180,37 @@
                 </Grid>
               </Expander>
 
-              <Expander Header="Android SDK and signing" Classes="advanced"
+              <Expander x:Name="PostProcessingSection" Header="APK post-processing" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
                 <StackPanel Margin="16,12,16,16" Spacing="10">
-                  <StackPanel Spacing="4">
-                    <TextBlock Text="Android SDK" Classes="advanced-field-label" />
-                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
-                      <TextBox x:Name="AndroidSdkPath" Classes="single-line"
-                               Watermark="ANDROID_SDK_ROOT when empty" />
-                      <Button Grid.Column="1" Content="⋯" Classes="browse"
-                              Tag="AndroidSdkPath" Click="BrowseFolderClick"
-                              AutomationProperties.Name="Choose Android SDK directory"
-                              ToolTip.Tip="Choose Android SDK directory" />
-                    </Grid>
-                  </StackPanel>
+                  <CheckBox x:Name="EnableAlignment" Content="Align the output APK"
+                            IsChecked="False" IsCheckedChanged="AlignmentToggleChanged" />
+                  <Grid x:Name="AlignmentFields" IsVisible="False"
+                        ColumnDefinitions="*,36" ColumnSpacing="8">
+                    <TextBox x:Name="ZipAlignPath" Classes="single-line"
+                             Watermark="zipalign from PATH when empty" />
+                    <Button Grid.Column="1" Content="⋯" Classes="browse"
+                            Tag="ZipAlignPath" Click="BrowseFileClick"
+                            AutomationProperties.Name="Choose zipalign executable"
+                            ToolTip.Tip="Choose zipalign executable" />
+                  </Grid>
                   <CheckBox x:Name="EnableSigning" Content="Sign the output APK"
                             IsChecked="False" IsCheckedChanged="SigningToggleChanged" />
                   <Grid x:Name="SigningFields" IsVisible="False"
-                        ColumnDefinitions="*,*" RowDefinitions="Auto,Auto"
+                        ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto"
                         ColumnSpacing="12" RowSpacing="10">
-                    <StackPanel Spacing="4">
+                    <StackPanel Grid.ColumnSpan="2" Spacing="4">
+                      <TextBlock Text="apksigner" Classes="advanced-field-label" />
+                      <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                        <TextBox x:Name="ApkSignerPath" Classes="single-line"
+                                 Watermark="apksigner from PATH when empty" />
+                        <Button Grid.Column="1" Content="⋯" Classes="browse"
+                                Tag="ApkSignerPath" Click="BrowseFileClick"
+                                AutomationProperties.Name="Choose apksigner executable"
+                                ToolTip.Tip="Choose apksigner executable" />
+                      </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Spacing="4">
                       <TextBlock Text="Keystore" Classes="advanced-field-label" />
                       <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
                         <TextBox x:Name="KeystorePath" Classes="single-line" />
@@ -204,16 +220,16 @@
                                 ToolTip.Tip="Choose keystore" />
                       </Grid>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Spacing="4">
+                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
                       <TextBlock Text="Key alias" Classes="advanced-field-label" />
                       <TextBox x:Name="KeyAlias" Classes="single-line" />
                     </StackPanel>
-                    <StackPanel Grid.Row="1" Spacing="4">
+                    <StackPanel Grid.Row="2" Spacing="4">
                       <TextBlock Text="Store password" Classes="advanced-field-label" />
                       <TextBox x:Name="StorePassword" Classes="single-line"
                                PasswordChar="●" />
                     </StackPanel>
-                    <StackPanel Grid.Row="1" Grid.Column="1" Spacing="4">
+                    <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
                       <TextBlock Text="Key password" Classes="advanced-field-label" />
                       <TextBox x:Name="KeyPassword" Classes="single-line"
                                PasswordChar="●" Watermark="Uses store password" />
@@ -287,7 +303,7 @@
                    Foreground="#B13A3A" TextWrapping="Wrap" />
         <Button x:Name="CancelButton" Grid.Column="1" Content="Cancel"
                 IsEnabled="False" Click="CancelClick" />
-        <Button x:Name="RunButton" Grid.Column="2" Content="Patch APK"
+        <Button x:Name="RunButton" Grid.Column="2" Content="Patch"
                 Classes="primary" Click="RunClick" />
       </Grid>
     </Border>

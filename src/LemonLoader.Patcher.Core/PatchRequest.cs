@@ -4,10 +4,16 @@ public sealed record SigningOptions(
     string KeyAlias,
     string? KeyPassword = null);
 
+internal enum PatchInputKind
+{
+    Apk,
+    Directory
+}
+
 public sealed record PatchRequest
 {
-    public required string InputApkPath { get; init; }
-    public required string OutputApkPath { get; init; }
+    public required string InputPath { get; init; }
+    public string? OutputPath { get; init; }
     public string? ReleasePath { get; init; }
     public string? DeploymentPath { get; init; }
     public DeploymentPolicyOptions DeploymentPolicies { get; init; } =
@@ -19,8 +25,26 @@ public sealed record PatchRequest
     public string? InteropOutputPath { get; init; }
     public string? Cpp2IlPath { get; init; }
     public string? Il2CppInteropCliPath { get; init; }
-    public string? AndroidSdkRoot { get; init; }
+    public bool AlignApk { get; init; }
+    public string? ZipAlignPath { get; init; }
+    public string? ApkSignerPath { get; init; }
     public SigningOptions? Signing { get; init; }
+    internal PatchInputKind InputKind { get; init; }
+
+    internal string ToolCacheRoot
+    {
+        get
+        {
+            var anchor = OutputPath ?? InputPath;
+            return Path.Combine(Path.GetDirectoryName(anchor) ?? anchor, ".tools");
+        }
+    }
+
+    internal ApkPostProcessingOptions PostProcessing => new(
+        AlignApk,
+        ZipAlignPath,
+        Signing,
+        ApkSignerPath);
 
     public PatchRequest NormalizeAndValidate()
     {
@@ -36,8 +60,8 @@ public sealed record PatchRequest
 
         var normalized = this with
         {
-            InputApkPath = FullPath(InputApkPath, "Input APK"),
-            OutputApkPath = FullPath(OutputApkPath, "Output APK"),
+            InputPath = FullPath(InputPath, "Input"),
+            OutputPath = OptionalPath(OutputPath),
             ReleasePath = OptionalPath(ReleasePath),
             DeploymentPath = OptionalPath(DeploymentPath),
             GameAssemblyPath = OptionalPath(GameAssemblyPath),
@@ -46,16 +70,47 @@ public sealed record PatchRequest
             InteropOutputPath = OptionalPath(InteropOutputPath),
             Cpp2IlPath = OptionalPath(Cpp2IlPath),
             Il2CppInteropCliPath = OptionalPath(Il2CppInteropCliPath),
-            AndroidSdkRoot = OptionalPath(AndroidSdkRoot),
+            ZipAlignPath = OptionalPath(ZipAlignPath),
+            ApkSignerPath = OptionalPath(ApkSignerPath),
             Signing = Signing is null
                 ? null
                 : Signing with { KeystorePath = FullPath(Signing.KeystorePath, "Keystore") }
         };
+        var inputIsFile = File.Exists(normalized.InputPath);
+        var inputIsDirectory = Directory.Exists(normalized.InputPath);
+        if (!inputIsFile && !inputIsDirectory)
+            throw new ArgumentException($"Input APK or directory was not found at '{normalized.InputPath}'.");
+        normalized = normalized with
+        {
+            InputKind = inputIsDirectory ? PatchInputKind.Directory : PatchInputKind.Apk
+        };
         var comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-        if (string.Equals(normalized.InputApkPath, normalized.OutputApkPath, comparison))
-            throw new ArgumentException("The output APK must not overwrite the input APK.");
+        if (inputIsDirectory)
+        {
+            if (normalized.OutputPath is not null)
+                throw new ArgumentException("Directory input is patched in place and does not accept --output.");
+            if (normalized.AlignApk || normalized.ZipAlignPath is not null ||
+                normalized.Signing is not null || normalized.ApkSignerPath is not null)
+            {
+                throw new ArgumentException(
+                    "Directory input does not support APK alignment or signing options.");
+            }
+        }
+        else
+        {
+            if (normalized.OutputPath is null)
+                throw new ArgumentException("APK input requires an output APK path.");
+            if (string.Equals(normalized.InputPath, normalized.OutputPath, comparison))
+                throw new ArgumentException("The output APK must not overwrite the input APK.");
+            if (Directory.Exists(normalized.OutputPath))
+                throw new ArgumentException($"Output APK path '{normalized.OutputPath}' is a directory.");
+            if (normalized.ZipAlignPath is not null && !normalized.AlignApk)
+                throw new ArgumentException("--zipalign requires --align.");
+            if (normalized.ApkSignerPath is not null && normalized.Signing is null)
+                throw new ArgumentException("--apksigner requires --keystore.");
+        }
         if (normalized.DeploymentPath is not null &&
             !Directory.Exists(normalized.DeploymentPath))
         {
@@ -75,14 +130,21 @@ public sealed record PatchRequest
         {
             throw new ArgumentException("Signing requires a keystore password and key alias.");
         }
+        if (normalized.Signing is { } normalizedSigning &&
+            !File.Exists(normalizedSigning.KeystorePath))
+        {
+            throw new ArgumentException(
+                $"Signing keystore was not found at '{normalizedSigning.KeystorePath}'.");
+        }
         return normalized;
     }
 }
 
 public sealed record PatchResult(
-    string OutputApkPath,
-    string Sha256,
-    string UnityVersion);
+    string OutputPath,
+    string? Sha256,
+    string UnityVersion,
+    bool ModifiedInPlace);
 
 public enum PatcherMessageKind
 {
@@ -92,67 +154,3 @@ public enum PatcherMessageKind
 }
 
 public sealed record PatcherMessage(PatcherMessageKind Kind, string Text);
-
-public sealed record UnityDependenciesRequest
-{
-    public required string UnityVersion { get; init; }
-    public required string OutputPath { get; init; }
-    public string? CachePath { get; init; }
-}
-
-public sealed record UnityDependenciesResult(
-    string OutputPath,
-    string PackageVersion,
-    string Source,
-    int AssemblyCount);
-
-public static class UnityDependenciesPipeline
-{
-    public static async Task<UnityDependenciesResult> RunAsync(
-        UnityDependenciesRequest request,
-        IProgress<PatcherMessage>? progress = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(request.UnityVersion))
-            throw new ArgumentException("Unity version is required.");
-        if (string.IsNullOrWhiteSpace(request.OutputPath))
-            throw new ArgumentException("Output directory is required.");
-
-        var outputPath = Path.GetFullPath(request.OutputPath);
-        var outputParent = Path.GetDirectoryName(outputPath) ?? outputPath;
-        var cachePath = string.IsNullOrWhiteSpace(request.CachePath)
-            ? Path.Combine(outputParent, ".tools", "UnityDependencies")
-            : Path.GetFullPath(request.CachePath);
-        if (ContainsPath(outputPath, cachePath) || ContainsPath(cachePath, outputPath))
-        {
-            throw new ArgumentException(
-                "Unity dependency output and cache directories must not contain each other.");
-        }
-        progress?.Report(new(PatcherMessageKind.Stage, "Resolving Unity dependencies"));
-        var resolution = await UnityDependenciesResolver.ResolveAsync(
-            cachePath,
-            request.UnityVersion,
-            progress,
-            cancellationToken);
-        UnityDependenciesResolver.Publish(resolution, outputPath);
-        progress?.Report(new(
-            PatcherMessageKind.Stage,
-            $"Published {resolution.AssemblyCount} Unity assemblies"));
-        return new(
-            outputPath,
-            resolution.PackageVersion,
-            resolution.Source,
-            resolution.AssemblyCount);
-
-        static bool ContainsPath(string parent, string child)
-        {
-            var comparison = OperatingSystem.IsWindows()
-                ? StringComparison.OrdinalIgnoreCase
-                : StringComparison.Ordinal;
-            var relative = Path.GetRelativePath(parent, child);
-            return relative == "." ||
-                   (!relative.StartsWith(".." + Path.DirectorySeparatorChar, comparison) &&
-                    !Path.IsPathRooted(relative));
-        }
-    }
-}

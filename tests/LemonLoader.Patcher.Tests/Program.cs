@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using static TestSupport;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -13,10 +14,13 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("APK payload layout", TestApkPayloadLayoutAsync),
+    ("Directory payload injection", TestDirectoryPayloadInjectionAsync),
     ("Deployment policy resolution", TestDeploymentPolicyResolutionAsync),
     ("Native library collision rejection", TestNativeLibraryCollisionAsync),
     ("Duplicate APK entry rejection", TestDuplicateApkEntryAsync),
     ("Signing password isolation", TestSigningPasswordIsolationAsync),
+    ("Optional APK post-processing contract", TestPostProcessingContractAsync),
+    ("External Android tool resolution", TestExternalToolResolutionAsync),
     ("CLI contract", TestCliContractAsync),
     ("Directory replacement", TestDirectoryReplacementAsync)
 };
@@ -49,7 +53,7 @@ static Task TestUnityVersionNormalizationAsync()
 static Task TestInteropGeneratorGameAssemblyAsync()
 {
     var input = Path.Combine("root", "input");
-    var arguments = ApkPatchPipeline.BuildInteropGeneratorArguments(
+    var arguments = GameInteropGenerator.BuildGeneratorArguments(
         "Il2CppInterop.CLI.dll",
         input,
         Path.Combine("root", "cpp2il"),
@@ -63,7 +67,6 @@ static Task TestInteropGeneratorGameAssemblyAsync()
     AssertEqual(Path.Combine(input, "libil2cpp.so"), arguments[optionIndex + 1]);
     return Task.CompletedTask;
 }
-
 static Task TestInteropGeneratorOverrideAsync()
 {
     var root = CreateTestRoot();
@@ -159,7 +162,7 @@ static Task TestSigningPasswordIsolationAsync()
 {
     const string storePassword = "store-secret";
     const string keyPassword = "key-secret";
-    var invocation = ApkPatchPipeline.CreateSigningInvocation(
+    var invocation = ApkPostProcessor.CreateSigningInvocation(
         new SigningOptions("signing.jks", storePassword, "alias", keyPassword),
         "signed.apk",
         "aligned.apk");
@@ -386,7 +389,7 @@ static Task TestApkPayloadLayoutAsync()
             "font-bundle");
         File.WriteAllText(Path.Combine(deploymentRoot, "Custom", "fixture.bin"), "future-input");
 
-        ApkPatchPipeline.MergeZip(apkPath, releaseRoot, interopRoot, deploymentRoot,
+        MergeApk(apkPath, releaseRoot, interopRoot, deploymentRoot,
             DeploymentPolicyOptions.Create(
             "production",
             ["UserData/Fonts/font.ab=enforce"]));
@@ -471,7 +474,7 @@ static Task TestApkPayloadLayoutAsync()
             ["lib/arm64-v8a/libmain.so"] = "game-main",
             ["assets/LemonLoader/payload.json"] = "existing-loader"
         });
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             alreadyPatchedApkPath,
             releaseRoot,
             interopRoot,
@@ -485,7 +488,7 @@ static Task TestApkPayloadLayoutAsync()
         var invalidDeploymentRoot = Path.Combine(root, "invalid-deployment");
         Directory.CreateDirectory(Path.Combine(invalidDeploymentRoot, "userdata"));
         File.WriteAllText(Path.Combine(invalidDeploymentRoot, "userdata", "font.ab"), "bad-casing");
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             invalidApkPath,
             releaseRoot,
             interopRoot,
@@ -503,7 +506,7 @@ static Task TestApkPayloadLayoutAsync()
             releaseRoot,
             "assets/LemonLoader/deployment/Mods/ExampleMod.dll",
             "release-owned");
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             collisionApkPath,
             releaseRoot,
             interopRoot,
@@ -519,7 +522,7 @@ static Task TestApkPayloadLayoutAsync()
         File.WriteAllText(
             Path.Combine(reservedRoot, ".lemonloader-backups", "payload.bin"),
             "reserved");
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             reservedApkPath,
             releaseRoot,
             interopRoot,
@@ -535,11 +538,99 @@ static Task TestApkPayloadLayoutAsync()
             documentationRelease,
             "assets/LemonLoader/runtime/loader/Documentation/README.md",
             "desktop documentation");
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             documentationApkPath,
             documentationRelease,
             interopRoot,
             null));
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
+    return Task.CompletedTask;
+}
+
+static Task TestDirectoryPayloadInjectionAsync()
+{
+    var root = CreateTestRoot();
+    try
+    {
+        var gameRoot = Path.Combine(root, "unpacked-game");
+        WritePayload(gameRoot, "lib/arm64-v8a/libmain.so", "game-main");
+        WritePayload(gameRoot, "lib/arm64-v8a/libunity.so", "unity");
+        WritePayload(gameRoot, "lib/arm64-v8a/libil2cpp.so", "il2cpp");
+        WritePayload(
+            gameRoot,
+            "assets/bin/Data/Managed/Metadata/global-metadata.dat",
+            "metadata");
+        WritePayload(gameRoot, "res/keep.txt", "untouched");
+        var releaseRoot = CreateReleaseTree(root);
+        var interopRoot = CreateInteropTree(root);
+        var deploymentRoot = Path.Combine(root, "directory-deployment");
+        WritePayload(deploymentRoot, "Mods/ExampleMod.dll", "mod");
+
+        InjectDirectory(
+            gameRoot,
+            releaseRoot,
+            interopRoot,
+            deploymentRoot,
+            DeploymentPolicyOptions.Create("production", []));
+
+        AssertEqual("untouched", File.ReadAllText(Path.Combine(gameRoot, "res", "keep.txt"), Encoding.UTF8));
+        AssertEqual("loader-main", File.ReadAllText(
+            Path.Combine(gameRoot, "lib", "arm64-v8a", "libmain.so"),
+            Encoding.UTF8));
+        AssertTrue(
+            File.Exists(Path.Combine(
+                gameRoot,
+                "assets",
+                "LemonLoader",
+                "runtime",
+                "interop",
+                "Game.dll")),
+            "Interop was not injected into the original directory.");
+        AssertTrue(
+            File.Exists(Path.Combine(
+                gameRoot,
+                "assets",
+                "LemonLoader",
+                "deployment",
+                "Mods",
+                "ExampleMod.dll")),
+            "Deployment was not injected into the original directory.");
+        AssertTrue(
+            Directory.GetDirectories(gameRoot, ".lemonloader-patcher-*", SearchOption.TopDirectoryOnly).Length == 0,
+            "Directory injection left a transaction directory behind.");
+
+        using var payload = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            gameRoot,
+            "assets",
+            "LemonLoader",
+            "payload.json")));
+        AssertEqual(
+            AndroidPayloadContract.ComputeTreeHash(gameRoot, "runtime/interop"),
+            payload.RootElement.GetProperty("interopSha256").GetString());
+        AssertEqual("production", payload.RootElement.GetProperty("deploymentProfile").GetString());
+
+        AssertThrows<InvalidDataException>(() => InjectDirectory(
+            gameRoot,
+            releaseRoot,
+            interopRoot,
+            null));
+
+        var collisionRoot = Path.Combine(root, "native-collision");
+        WritePayload(collisionRoot, "lib/arm64-v8a/libmain.so", "original-main");
+        WritePayload(collisionRoot, "lib/arm64-v8a/libunity.so", "unity");
+        WritePayload(collisionRoot, "lib/arm64-v8a/lemssl.so", "game-private-name");
+        AssertThrows<InvalidDataException>(() => InjectDirectory(
+            collisionRoot,
+            CreateReleaseTree(root, ["lemssl.so"]),
+            interopRoot,
+            null));
+        AssertEqual("original-main", File.ReadAllText(
+            Path.Combine(collisionRoot, "lib", "arm64-v8a", "libmain.so"),
+            Encoding.UTF8));
     }
     finally
     {
@@ -611,7 +702,7 @@ static Task TestNativeLibraryCollisionAsync()
         var releaseRoot = CreateReleaseTree(root, ["lemcrypto.so", "lemssl.so"]);
         var interopRoot = CreateInteropTree(root);
 
-        ApkPatchPipeline.MergeZip(apkPath, releaseRoot, interopRoot, null);
+        MergeApk(apkPath, releaseRoot, interopRoot, null);
         using (var gameApk = ZipFile.OpenRead(apkPath))
         {
             AssertTrue(
@@ -635,7 +726,7 @@ static Task TestNativeLibraryCollisionAsync()
             ["lib/arm64-v8a/lemssl.so"] = "conflicting-private-name"
         });
         AssertThrows<InvalidDataException>(() =>
-            ApkPatchPipeline.MergeZip(privateCollisionApkPath, releaseRoot, interopRoot, null));
+            MergeApk(privateCollisionApkPath, releaseRoot, interopRoot, null));
 
         var otherApkPath = Path.Combine(root, "other-game.apk");
         CreateZip(otherApkPath, new Dictionary<string, string>(StringComparer.Ordinal)
@@ -646,7 +737,7 @@ static Task TestNativeLibraryCollisionAsync()
         var otherReleaseRoot = CreateReleaseTree(root);
         WritePayload(otherReleaseRoot, "lib/arm64-v8a/libextra.so", "same-content");
         AssertThrows<InvalidDataException>(() =>
-            ApkPatchPipeline.MergeZip(otherApkPath, otherReleaseRoot, interopRoot, null));
+            MergeApk(otherApkPath, otherReleaseRoot, interopRoot, null));
     }
     finally
     {
@@ -667,7 +758,7 @@ static Task TestDuplicateApkEntryAsync()
             WriteZipEntry(archive, "lib/arm64-v8a/libmain.so", "second");
         }
 
-        AssertThrows<InvalidDataException>(() => ApkPatchPipeline.MergeZip(
+        AssertThrows<InvalidDataException>(() => MergeApk(
             apkPath,
             CreateReleaseTree(root),
             CreateInteropTree(root),
@@ -680,54 +771,207 @@ static Task TestDuplicateApkEntryAsync()
     return Task.CompletedTask;
 }
 
+static async Task TestPostProcessingContractAsync()
+{
+    var root = CreateTestRoot();
+    try
+    {
+        var apk = Path.Combine(root, "game.apk");
+        var output = Path.Combine(root, "patched.apk");
+        File.WriteAllText(apk, "apk");
+        var basic = new PatchRequest
+        {
+            InputPath = apk,
+            OutputPath = output
+        }.NormalizeAndValidate();
+        AssertTrue(!basic.AlignApk, "APK alignment must be opt-in.");
+        AssertTrue(basic.Signing is null, "APK signing must be opt-in.");
+        await ApkPostProcessor.PublishAsync(
+            apk,
+            basic.OutputPath!,
+            root,
+            ApkPostProcessor.Resolve(basic.PostProcessing),
+            null,
+            CancellationToken.None);
+        AssertEqual("apk", File.ReadAllText(output));
+
+        var keystore = Path.Combine(root, "signing.jks");
+        File.WriteAllText(keystore, "keystore");
+        var signingOnly = new PatchRequest
+        {
+            InputPath = apk,
+            OutputPath = output,
+            Signing = new SigningOptions(keystore, "password", "alias")
+        }.NormalizeAndValidate();
+        AssertTrue(!signingOnly.AlignApk, "Signing must not implicitly request alignment.");
+        AssertTrue(signingOnly.Signing is not null, "Signing-only APK output was rejected.");
+
+        var missingAlignTool = new PatchRequest
+        {
+            InputPath = apk,
+            OutputPath = Path.Combine(root, "aligned.apk"),
+            AlignApk = true,
+            ZipAlignPath = Path.Combine(root, "missing-zipalign")
+        }.NormalizeAndValidate();
+        AssertThrows<InvalidOperationException>(() =>
+            ApkPostProcessor.Resolve(missingAlignTool.PostProcessing));
+
+        var missingSignerTool = signingOnly with
+        {
+            OutputPath = Path.Combine(root, "signed.apk"),
+            ApkSignerPath = Path.Combine(root, "missing-apksigner")
+        };
+        AssertThrows<InvalidOperationException>(() =>
+            ApkPostProcessor.Resolve(missingSignerTool.PostProcessing));
+
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = apk,
+            OutputPath = output,
+            ZipAlignPath = Path.Combine(root, "zipalign")
+        }.NormalizeAndValidate());
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = apk,
+            OutputPath = output,
+            ApkSignerPath = Path.Combine(root, "apksigner")
+        }.NormalizeAndValidate());
+
+        var directory = Path.Combine(root, "unpacked");
+        Directory.CreateDirectory(directory);
+        var inPlace = new PatchRequest { InputPath = directory }.NormalizeAndValidate();
+        AssertTrue(inPlace.OutputPath is null, "Directory input must not create an output directory.");
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = directory,
+            OutputPath = Path.Combine(root, "copy")
+        }.NormalizeAndValidate());
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = directory,
+            AlignApk = true
+        }.NormalizeAndValidate());
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = directory,
+            Signing = new SigningOptions(keystore, "password", "alias")
+        }.NormalizeAndValidate());
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
+}
+
+static Task TestExternalToolResolutionAsync()
+{
+    var root = CreateTestRoot();
+    var originalPath = Environment.GetEnvironmentVariable("PATH");
+    try
+    {
+        var explicitTool = Path.Combine(root, "explicit-tool");
+        File.WriteAllText(explicitTool, "tool");
+        AssertEqual(
+            Path.GetFullPath(explicitTool),
+            ExternalToolResolver.Resolve("zipalign", explicitTool, "--zipalign"));
+
+        var pathToolName = OperatingSystem.IsWindows() ? "zipalign.exe" : "zipalign";
+        var pathTool = Path.Combine(root, pathToolName);
+        File.WriteAllText(pathTool, "tool");
+        Environment.SetEnvironmentVariable("PATH", root);
+        AssertEqual(
+            Path.GetFullPath(pathTool),
+            ExternalToolResolver.Resolve("zipalign", null, "--zipalign"));
+
+        Environment.SetEnvironmentVariable("PATH", string.Empty);
+        AssertThrows<InvalidOperationException>(() =>
+            ExternalToolResolver.Resolve("apksigner", null, "--apksigner"));
+        AssertThrows<InvalidOperationException>(() =>
+            ExternalToolResolver.Resolve("zipalign", Path.Combine(root, "missing"), "--zipalign"));
+    }
+    finally
+    {
+        Environment.SetEnvironmentVariable("PATH", originalPath);
+        Directory.Delete(root, true);
+    }
+    return Task.CompletedTask;
+}
+
 static async Task TestCliContractAsync()
 {
-    var apk = Path.GetFullPath("game.apk");
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        [apk, "--output", apk]));
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        [apk, "--output", Path.GetFullPath("mod.apk"), "--unknown", "value"]));
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        ["--apk", apk, "--output", Path.GetFullPath("mod.apk")]));
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        [apk, "--output", Path.GetFullPath("mod.apk"), "--mod", "ExampleMod.dll"]));
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        [apk, "--output", Path.GetFullPath("mod.apk"), "--il2cppinterop-cli", "missing.dll"]));
-    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
-        [apk, "--output", Path.GetFullPath("mod.apk"), "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location + ".exe"]));
-    var request = CliApplication.ParsePatchRequest(
-    [
-        apk,
-        "--output", Path.GetFullPath("mod.apk"),
-        "--deployment", ".",
-        "--profile", "production",
-        "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location,
-        "--policy", "Mods/**=upgrade",
-        "--policy", "Mods/Required.dll=enforce"
-    ]);
-    AssertEqual(Path.GetFullPath("."), request.DeploymentPath);
-    AssertEqual(
-        Path.GetFullPath(typeof(ApkPatchPipeline).Assembly.Location),
-        request.Il2CppInteropCliPath);
-    AssertEqual(
-        DeploymentFilePolicy.Upgrade,
-        request.DeploymentPolicies.Resolve("Mods/Other.dll"));
-    AssertEqual(
-        DeploymentFilePolicy.Enforce,
-        request.DeploymentPolicies.Resolve("Mods/Required.dll"));
-    using var output = new StringWriter();
-    using var error = new StringWriter();
-    var exitCode = await CliApplication.RunAsync(
-        ["patch", "--apk", apk, "--output", Path.GetFullPath("mod.apk")],
-        output,
-        error);
-    AssertEqual(CliApplication.UsageError, exitCode);
-    AssertTrue(
-        error.ToString().StartsWith("error: ", StringComparison.Ordinal),
-        "CLI usage errors must use the stable error prefix.");
-    AssertTrue(
-        !error.ToString().Contains("   at ", StringComparison.Ordinal),
-        "CLI errors must not include a stack trace unless --verbose is supplied.");
+    var root = CreateTestRoot();
+    try
+    {
+        var apk = Path.Combine(root, "game.apk");
+        var outputApk = Path.Combine(root, "mod.apk");
+        File.WriteAllText(apk, "apk");
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", apk]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--unknown", "value"]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            ["--apk", apk, "--output", outputApk]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--mod", "ExampleMod.dll"]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--il2cppinterop-cli", "missing.dll"]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location + ".exe"]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--zipalign", "zipalign"]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [apk, "--output", outputApk, "--align", "--align"]));
+
+        var request = CliRequestParser.ParsePatchRequest(
+        [
+            apk,
+            "--output", outputApk,
+            "--deployment", root,
+            "--profile", "production",
+            "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location,
+            "--align",
+            "--policy", "Mods/**=upgrade",
+            "--policy", "Mods/Required.dll=enforce"
+        ]);
+        AssertEqual(Path.GetFullPath(root), request.DeploymentPath);
+        AssertTrue(request.AlignApk, "The --align switch was not parsed.");
+        AssertEqual(
+            Path.GetFullPath(typeof(ApkPatchPipeline).Assembly.Location),
+            request.Il2CppInteropCliPath);
+        AssertEqual(
+            DeploymentFilePolicy.Upgrade,
+            request.DeploymentPolicies.Resolve("Mods/Other.dll"));
+        AssertEqual(
+            DeploymentFilePolicy.Enforce,
+            request.DeploymentPolicies.Resolve("Mods/Required.dll"));
+
+        var directory = Path.Combine(root, "unpacked");
+        Directory.CreateDirectory(directory);
+        var directoryRequest = CliRequestParser.ParsePatchRequest([directory]);
+        AssertTrue(directoryRequest.OutputPath is null, "CLI directory mode must be in place.");
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [directory, "--output", Path.Combine(root, "copy")]));
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [directory, "--align"]));
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        var exitCode = await CliApplication.RunAsync(
+            ["patch", "--apk", apk, "--output", outputApk],
+            output,
+            error);
+        AssertEqual(CliApplication.UsageError, exitCode);
+        AssertTrue(
+            error.ToString().StartsWith("error: ", StringComparison.Ordinal),
+            "CLI usage errors must use the stable error prefix.");
+        AssertTrue(
+            !error.ToString().Contains("   at ", StringComparison.Ordinal),
+            "CLI errors must not include a stack trace unless --verbose is supplied.");
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
 }
 
 static Task TestDirectoryReplacementAsync()
@@ -750,224 +994,4 @@ static Task TestDirectoryReplacementAsync()
         Directory.Delete(root, true);
     }
     return Task.CompletedTask;
-}
-
-static byte[] CreateUnityArchive()
-{
-    var assemblyBytes = File.ReadAllBytes(typeof(CliApplication).Assembly.Location);
-    using var output = new MemoryStream();
-    using (var archive = new ZipArchive(output, ZipArchiveMode.Create, true))
-    {
-        foreach (var name in new[] { "UnityEngine.dll", "UnityEngine.CoreModule.dll" })
-        {
-            var entry = archive.CreateEntry(name);
-            using var stream = entry.Open();
-            stream.Write(assemblyBytes);
-        }
-    }
-    return output.ToArray();
-}
-
-static string CreateReleaseTree(
-    string root,
-    IReadOnlyList<string>? privateNativeLibraries = null)
-{
-    var releaseRoot = Path.Combine(root, $"release-{Guid.NewGuid():N}");
-    WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
-    WritePayload(releaseRoot, "assets/LemonLoader/runtime/loader/net6/MelonLoader.dll", "loader");
-    WritePayload(releaseRoot, "assets/LemonLoader/runtime/dotnet/host/fxr/10.0.10/libhostfxr.so", "hostfxr");
-    WritePayload(
-        releaseRoot,
-        "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
-        "coreclr");
-    foreach (var library in privateNativeLibraries ?? [])
-        WritePayload(
-            releaseRoot,
-            $"assets/LemonLoader/runtime/dotnet/native/openssl/{library}",
-            $"private-{library}");
-    WritePayload(
-        releaseRoot,
-        "assets/LemonLoader/payload.json",
-        JsonSerializer.Serialize(new
-        {
-            formatVersion = AndroidPayloadContract.FormatVersion,
-            loaderSha256 = new string('0', 64),
-            dotnetSha256 = new string('0', 64),
-            interopSha256 = new string('0', 64),
-            deploymentSha256 = new string('0', 64),
-            deploymentProfile = "development",
-            deploymentRevisionSha256 = ComputeDeploymentRevision([]),
-            deploymentFiles = Array.Empty<object>(),
-            privateNativeLibraries = privateNativeLibraries ?? []
-        }));
-    return releaseRoot;
-}
-
-static string CreateInteropTree(string root)
-{
-    var interopRoot = Path.Combine(root, $"interop-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(interopRoot);
-    File.WriteAllText(Path.Combine(interopRoot, "Game.dll"), "interop");
-    File.WriteAllText(
-        Path.Combine(interopRoot, InteropGenerationManifest.FileName),
-        "{}");
-    return interopRoot;
-}
-
-static void CreateZip(string path, IReadOnlyDictionary<string, string> entries)
-{
-    using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
-    foreach (var entry in entries)
-        WriteZipEntry(archive, entry.Key, entry.Value);
-}
-
-static void WriteZipEntry(ZipArchive archive, string name, string content)
-{
-    var entry = archive.CreateEntry(name);
-    using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
-    writer.Write(content);
-}
-
-static string ReadZipEntry(ZipArchive archive, string name)
-{
-    using var reader = new StreamReader(
-        archive.GetEntry(name)?.Open() ?? throw new InvalidOperationException($"Missing ZIP entry '{name}'."),
-        Encoding.UTF8);
-    return reader.ReadToEnd();
-}
-
-static string ComputePayloadHash(ZipArchive archive, string scope)
-{
-    var lines = new List<string>
-    {
-        $"layout-version={AndroidPayloadContract.FormatVersion}",
-        $"scope={scope}"
-    };
-    foreach (var entry in archive.Entries
-                 .Where(entry => !string.IsNullOrEmpty(entry.Name) &&
-                                 entry.FullName.StartsWith(
-                                     $"assets/LemonLoader/{scope}/",
-                                     StringComparison.Ordinal))
-                 .OrderBy(entry => entry.FullName, StringComparer.Ordinal))
-    {
-        using var input = entry.Open();
-        var hash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-        lines.Add(
-            $"{entry.FullName["assets/LemonLoader/".Length..]}|{entry.Length}|{hash}");
-    }
-    return Convert.ToHexString(SHA256.HashData(
-        Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
-}
-
-static string ComputePayloadDirectoryHash(string releaseRoot, string scope)
-{
-    var payloadRoot = Path.Combine(releaseRoot, "assets", "LemonLoader");
-    var scopeRoot = Path.Combine(payloadRoot, scope);
-    var files = Directory.Exists(scopeRoot)
-        ? Directory.EnumerateFiles(scopeRoot, "*", SearchOption.AllDirectories)
-        : Enumerable.Empty<string>();
-    var lines = new List<string>
-    {
-        $"layout-version={AndroidPayloadContract.FormatVersion}",
-        $"scope={scope}"
-    };
-    foreach (var path in files.OrderBy(
-                 path => Path.GetRelativePath(payloadRoot, path).Replace('\\', '/'),
-                 StringComparer.Ordinal))
-    {
-        using var input = File.OpenRead(path);
-        var relativePath = Path.GetRelativePath(payloadRoot, path).Replace('\\', '/');
-        lines.Add(
-            $"{relativePath}|{input.Length}|{Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant()}");
-    }
-    return Convert.ToHexString(SHA256.HashData(
-        Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
-}
-
-static string ComputeDeploymentRevision(IEnumerable<JsonElement> files)
-{
-    var lines = new List<string> { "deployment-revision=1" };
-    lines.AddRange(files
-        .OrderBy(file => file.GetProperty("path").GetString(), StringComparer.Ordinal)
-        .Select(file =>
-            $"{file.GetProperty("path").GetString()}|" +
-            $"{file.GetProperty("size").GetInt64()}|" +
-            $"{file.GetProperty("sha256").GetString()}|" +
-            file.GetProperty("policy").GetString()));
-    return Convert.ToHexString(SHA256.HashData(
-        Encoding.UTF8.GetBytes(string.Join('\n', lines)))).ToLowerInvariant();
-}
-
-static HttpResponseMessage ZipResponse(byte[] archive) => new(HttpStatusCode.OK)
-{
-    Content = new ByteArrayContent(archive)
-};
-
-static (string Path, long Size, string Hash) WritePayload(
-    string root,
-    string relativePath,
-    string content)
-{
-    var path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    File.WriteAllText(path, content, Encoding.UTF8);
-    using var input = File.OpenRead(path);
-    return (
-        relativePath,
-        input.Length,
-        Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant());
-}
-
-static string CreateTestRoot()
-{
-    var root = Path.Combine(Path.GetTempPath(), $"lemonloader-patcher-tests-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(root);
-    return root;
-}
-
-static void AssertTrue(bool condition, string message)
-{
-    if (!condition)
-        throw new InvalidOperationException(message);
-}
-
-static void AssertEqual<T>(T expected, T actual)
-{
-    if (!EqualityComparer<T>.Default.Equals(expected, actual))
-        throw new InvalidOperationException($"Expected '{expected}', got '{actual}'.");
-}
-
-static void AssertThrows<TException>(Action action) where TException : Exception
-{
-    try
-    {
-        action();
-    }
-    catch (TException)
-    {
-        return;
-    }
-    throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
-}
-
-static async Task AssertThrowsAsync<TException>(Func<Task> action)
-    where TException : Exception
-{
-    try
-    {
-        await action();
-    }
-    catch (TException)
-    {
-        return;
-    }
-    throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
-}
-
-internal sealed class DelegateHandler(
-    Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
-{
-    protected override Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request,
-        CancellationToken cancellationToken) => Task.FromResult(handler(request));
 }
