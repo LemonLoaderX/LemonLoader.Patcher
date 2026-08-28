@@ -10,6 +10,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Unity dependency cache repair", TestUnityDependencyCacheRepairAsync),
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
+    ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("APK payload layout", TestApkPayloadLayoutAsync),
     ("Deployment policy resolution", TestDeploymentPolicyResolutionAsync),
@@ -54,9 +55,103 @@ static Task TestInteropGeneratorGameAssemblyAsync()
         Path.Combine("root", "cpp2il"),
         Path.Combine("root", "output"),
         Path.Combine("root", "unity"));
+    AssertEqual("--roll-forward", arguments[0]);
+    AssertEqual("Major", arguments[1]);
+    AssertEqual("Il2CppInterop.CLI.dll", arguments[2]);
     var optionIndex = Array.IndexOf(arguments, "--game-assembly");
     AssertTrue(optionIndex >= 0, "Interop generation must receive the game assembly.");
     AssertEqual(Path.Combine(input, "libil2cpp.so"), arguments[optionIndex + 1]);
+    return Task.CompletedTask;
+}
+
+static Task TestInteropGeneratorOverrideAsync()
+{
+    var root = CreateTestRoot();
+    try
+    {
+        var toolPath = Path.Combine(root, "Il2CppInterop.CLI.dll");
+        File.Copy(typeof(ApkPatchPipeline).Assembly.Location, toolPath);
+        var generatorPath = Path.Combine(root, "Il2CppInterop.Generator.dll");
+        File.WriteAllText(generatorPath, "generator-v1");
+        var provenancePath = Path.Combine(
+            root,
+            BundledInteropGeneratorTool.ProvenanceFileName);
+        var provenance = JsonSerializer.Serialize(new
+        {
+            formatVersion = 1,
+            revision = BundledInteropGeneratorTool.Revision
+        });
+        File.WriteAllText(provenancePath, provenance);
+        var tool = InteropGeneratorTool.FromOverride(toolPath);
+        AssertEqual(Path.GetFullPath(toolPath), tool.Path);
+        AssertEqual("override", tool.Source);
+        AssertTrue(!string.IsNullOrWhiteSpace(tool.Version), "The override tool version was not detected.");
+        var bundledTool = InteropGeneratorTool.FromBundledFork(toolPath);
+        AssertEqual("bundled-fork", bundledTool.Source);
+        File.WriteAllText(
+            provenancePath,
+            JsonSerializer.Serialize(new { formatVersion = 1, revision = new string('0', 40) }));
+        AssertThrows<InvalidDataException>(() =>
+            InteropGeneratorTool.FromBundledFork(toolPath));
+        File.WriteAllText(provenancePath, provenance);
+        AssertEqual(
+            "aecf17eeb5a6edd0b1aa4d1dc6460a83a0716aba",
+            BundledInteropGeneratorTool.Revision);
+        AssertEqual(
+            "https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip",
+            ReleaseResolver.LatestUrl);
+        File.WriteAllText(generatorPath, "generator-v2");
+        var changedTool = InteropGeneratorTool.FromOverride(toolPath);
+        AssertTrue(
+            changedTool.ContentSha256 != tool.ContentSha256,
+            "The tool content hash did not include the generator dependency.");
+        File.WriteAllText(generatorPath, "generator-v1");
+
+        var input = Path.Combine(root, "input");
+        var output = Path.Combine(root, "output");
+        var unity = Path.Combine(root, "unity");
+        Directory.CreateDirectory(input);
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(unity);
+        File.WriteAllText(Path.Combine(input, "libil2cpp.so"), "game-assembly");
+        File.WriteAllText(Path.Combine(input, "global-metadata.dat"), "metadata");
+        File.WriteAllText(Path.Combine(output, "Game.dll"), "generated");
+        var cpp2Il = Path.Combine(root, "Cpp2IL.exe");
+        File.WriteAllText(cpp2Il, "cpp2il");
+
+        InteropGenerationManifest.Write(
+            output,
+            input,
+            "6000.3.8f1",
+            new UnityDependenciesResolution(
+                unity,
+                "6000.3.8f1",
+                "6000.3.8",
+                "fixture",
+                null,
+                null,
+                1,
+                new string('1', 64)),
+            cpp2Il,
+            "fixture",
+            tool);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(
+            Path.Combine(output, InteropGenerationManifest.FileName)));
+        var tools = document.RootElement.GetProperty("tools");
+        AssertEqual("override", tools.GetProperty("il2CppInteropSource").GetString());
+        AssertEqual(tool.Version, tools.GetProperty("il2CppInteropVersion").GetString());
+        AssertEqual(
+            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(toolPath))).ToLowerInvariant(),
+            tools.GetProperty("il2CppInteropSha256").GetString());
+        AssertEqual(
+            tool.ContentSha256,
+            tools.GetProperty("il2CppInteropContentSha256").GetString());
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
     return Task.CompletedTask;
 }
 
@@ -596,16 +691,24 @@ static async Task TestCliContractAsync()
         ["--apk", apk, "--output", Path.GetFullPath("mod.apk")]));
     AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
         [apk, "--output", Path.GetFullPath("mod.apk"), "--mod", "ExampleMod.dll"]));
+    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
+        [apk, "--output", Path.GetFullPath("mod.apk"), "--il2cppinterop-cli", "missing.dll"]));
+    AssertThrows<CliUsageException>(() => CliApplication.ParsePatchRequest(
+        [apk, "--output", Path.GetFullPath("mod.apk"), "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location + ".exe"]));
     var request = CliApplication.ParsePatchRequest(
     [
         apk,
         "--output", Path.GetFullPath("mod.apk"),
         "--deployment", ".",
         "--profile", "production",
+        "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location,
         "--policy", "Mods/**=upgrade",
         "--policy", "Mods/Required.dll=enforce"
     ]);
     AssertEqual(Path.GetFullPath("."), request.DeploymentPath);
+    AssertEqual(
+        Path.GetFullPath(typeof(ApkPatchPipeline).Assembly.Location),
+        request.Il2CppInteropCliPath);
     AssertEqual(
         DeploymentFilePolicy.Upgrade,
         request.DeploymentPolicies.Resolve("Mods/Other.dll"));

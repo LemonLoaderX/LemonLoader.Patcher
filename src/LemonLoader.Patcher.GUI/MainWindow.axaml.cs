@@ -204,6 +204,7 @@ public sealed partial class MainWindow : Window
             MetadataPath = Optional(MetadataPath),
             InteropOutputPath = Optional(InteropOutputPath),
             Cpp2IlPath = Optional(Cpp2IlPath),
+            Il2CppInteropCliPath = Optional(Il2CppInteropCliPath),
             AndroidSdkRoot = Optional(AndroidSdkPath),
             Signing = signing
         };
@@ -303,6 +304,7 @@ public sealed partial class MainWindow : Window
         nameof(MetadataPath) => "Choose global-metadata.dat",
         nameof(InteropOutputPath) => "Choose Interop output directory",
         nameof(Cpp2IlPath) => "Choose Cpp2IL executable",
+        nameof(Il2CppInteropCliPath) => "Choose Il2CppInterop CLI assembly",
         nameof(AndroidSdkPath) => "Choose Android SDK directory",
         nameof(KeystorePath) => "Choose signing keystore",
         nameof(DependenciesOutputPath) => "Choose Unity dependencies output",
@@ -317,6 +319,7 @@ public sealed partial class MainWindow : Window
             nameof(ReleasePath) => [ArchiveFileType],
             nameof(GameAssemblyPath) => [SharedObjectFileType],
             nameof(MetadataPath) => [MetadataFileType],
+            nameof(Il2CppInteropCliPath) => [ManagedAssemblyFileType],
             nameof(KeystorePath) => [KeystoreFileType],
             _ => [FilePickerFileTypes.All]
         };
@@ -336,6 +339,10 @@ public sealed partial class MainWindow : Window
     private static readonly FilePickerFileType MetadataFileType = new("IL2CPP metadata")
     {
         Patterns = ["*.dat"]
+    };
+    private static readonly FilePickerFileType ManagedAssemblyFileType = new("Managed assembly")
+    {
+        Patterns = ["*.dll"]
     };
     private static readonly FilePickerFileType KeystoreFileType = new("Java keystore")
     {

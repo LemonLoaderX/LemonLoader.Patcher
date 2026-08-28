@@ -138,6 +138,9 @@ public sealed class ApkPatchPipeline
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(outputRoot);
+        var interopTool = request.Il2CppInteropCliPath is null
+            ? InteropGeneratorTool.FromBundledFork(BundledInteropGeneratorTool.FindToolDll())
+            : InteropGeneratorTool.FromOverride(request.Il2CppInteropCliPath);
         var cpp2Il = request.Cpp2IlPath ?? await Cpp2IlResolver.ResolveAsync(
             Path.Combine(Path.GetDirectoryName(request.OutputApkPath)!, ".tools"),
             progress,
@@ -155,15 +158,15 @@ public sealed class ApkPatchPipeline
             "--game-path", inputRoot, "--force-binary-path", Path.Combine(inputRoot, "libil2cpp.so"),
             "--force-metadata-path", Path.Combine(inputRoot, "global-metadata.dat"), "--force-unity-version", unityVersion,
             "--output-as", "dummydll", "--output-to", dummyRoot, "--use-processor", "attributeanalyzer,attributeinjector");
-        await ProcessRunner.RunAsync("dotnet", progress, cancellationToken,
-            "tool", "restore", "--tool-manifest", ToolManifest.Path,
-            "--add-source", "https://nuget.bepinex.dev/v3/index.json");
+        progress?.Report(new(
+            PatcherMessageKind.Stage,
+            $"Using Il2CppInterop {interopTool.Version} from {interopTool.Source}"));
         await ProcessRunner.RunAsync(
             "dotnet",
             progress,
             cancellationToken,
             BuildInteropGeneratorArguments(
-                Path.GetFullPath(ToolManifest.FindToolDll()),
+                interopTool.Path,
                 inputRoot,
                 dummyRoot,
                 outputRoot,
@@ -176,7 +179,7 @@ public sealed class ApkPatchPipeline
             unityDependencies,
             cpp2Il,
             Cpp2IlResolver.Version,
-            ToolManifest.Version);
+            interopTool);
     }
 
     internal static string[] BuildInteropGeneratorArguments(
@@ -186,6 +189,7 @@ public sealed class ApkPatchPipeline
         string outputRoot,
         string unityDependenciesRoot) =>
     [
+        "--roll-forward", "Major",
         toolDll,
         "generate",
         "--input", dummyRoot,
@@ -714,18 +718,6 @@ internal static class ProcessRunner
     }
 }
 
-internal static class ToolManifest
-{
-    public const string Version = "1.5.1-ci.845";
-    public static string Path => System.IO.Path.Combine(AppContext.BaseDirectory, ".config", "dotnet-tools.json");
-    public static string FindToolDll()
-    {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var store = System.IO.Path.Combine(home, ".nuget", "packages", "il2cppinterop.cli", Version);
-        return Directory.GetFiles(store, "Il2CppInterop.CLI.dll", SearchOption.AllDirectories).Single();
-    }
-}
-
 internal static class Cpp2IlResolver
 {
     public const string Version = "2022.1.0-pre-release.21";
@@ -811,30 +803,13 @@ internal static class Cpp2IlResolver
 internal static class ReleaseResolver
 {
     private const string ReleaseFileName = "LemonLoader-Android-arm64.zip";
-    private const string LatestUrl = "https://github.com/LemonLoader/MelonLoader/releases/latest/download/LemonLoader-Android-arm64.zip";
+    internal const string LatestUrl = "https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip";
 
     public static async Task<string> ResolveLatestAsync(
         string root,
         IProgress<PatcherMessage>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var bundledCandidates = new[]
-        {
-            Path.Combine(AppContext.BaseDirectory, ReleaseFileName),
-            Path.Combine(AppContext.BaseDirectory, "..", ReleaseFileName),
-            Path.Combine(Environment.CurrentDirectory, ReleaseFileName)
-        };
-        foreach (var candidate in bundledCandidates.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (File.Exists(candidate))
-            {
-                progress?.Report(new(
-                    PatcherMessageKind.Stage,
-                    $"Using bundled LemonLoader Release: {candidate}"));
-                return candidate;
-            }
-        }
-
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, ReleaseFileName);
         if (File.Exists(path) && IsReadableRelease(path))
@@ -880,7 +855,7 @@ internal static class ReleaseResolver
             throw new InvalidOperationException(
                 $"Could not download the latest LemonLoader Release from '{LatestUrl}' " +
                 $"({status}). " +
-                "Choose a local Release archive or publish the Patcher with a bundled Release.",
+                "Choose a local Release archive with --release or try again when the Release repository is available.",
                 exception);
         }
         finally

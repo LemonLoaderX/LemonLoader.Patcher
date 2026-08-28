@@ -94,7 +94,7 @@
               <Expander Header="Interop overrides" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
                 <Grid Margin="16,12,16,16" ColumnDefinitions="*,*"
-                      RowDefinitions="Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                      RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
                   <StackPanel Spacing="4">
                     <TextBlock Text="Unity version" Classes="advanced-field-label" />
                     <TextBox x:Name="UnityVersion" Classes="single-line"
@@ -158,6 +158,18 @@
                               Tag="Cpp2IlPath" Click="BrowseFileClick"
                               AutomationProperties.Name="Choose Cpp2IL executable"
                               ToolTip.Tip="Choose Cpp2IL executable" />
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="4">
+                    <TextBlock Text="Il2CppInterop CLI" Classes="advanced-field-label" />
+                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
+                      <TextBox x:Name="Il2CppInteropCliPath" Classes="single-line"
+                               Watermark="Bundled fixed generator when empty" />
+                      <Button Grid.Column="1" Content="⋯" Classes="browse"
+                              Tag="Il2CppInteropCliPath" Click="BrowseFileClick"
+                              AutomationProperties.Name="Choose Il2CppInterop CLI assembly"
+                              ToolTip.Tip="Choose built Il2CppInterop.CLI.dll" />
                     </Grid>
                   </StackPanel>
                 </Grid>

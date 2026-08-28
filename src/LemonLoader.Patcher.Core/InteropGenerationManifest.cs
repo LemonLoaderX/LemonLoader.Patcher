@@ -12,7 +12,7 @@ internal static class InteropGenerationManifest
         UnityDependenciesResolution unityDependencies,
         string cpp2IlPath,
         string cpp2IlVersion,
-        string il2CppInteropVersion)
+        InteropGeneratorTool il2CppInterop)
     {
         var assemblies = Directory.GetFiles(outputDirectory, "*.dll", SearchOption.TopDirectoryOnly)
             .OrderBy(path => path, StringComparer.Ordinal)
@@ -45,7 +45,10 @@ internal static class InteropGenerationManifest
             {
                 cpp2IlVersion,
                 cpp2IlSha256 = HashFile(cpp2IlPath),
-                il2CppInteropVersion,
+                il2CppInteropVersion = il2CppInterop.Version,
+                il2CppInteropSource = il2CppInterop.Source,
+                il2CppInteropSha256 = il2CppInterop.Sha256,
+                il2CppInteropContentSha256 = il2CppInterop.ContentSha256,
                 xrefCache = false
             },
             assemblies

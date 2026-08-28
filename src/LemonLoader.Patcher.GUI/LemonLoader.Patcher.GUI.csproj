@@ -12,7 +12,5 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
     <ProjectReference Include="../LemonLoader.Patcher.Core/LemonLoader.Patcher.Core.csproj"
                       GlobalPropertiesToRemove="PublishSingleFile;SelfContained" />
-    <None Include="../../.config/dotnet-tools.json" Link=".config/dotnet-tools.json"
-          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -118,7 +118,7 @@ public static class CliApplication
             [
                 "--output", "--release", "--deployment", "--profile", "--policy",
                 "--game-assembly", "--metadata", "--unity-version", "--unity-libraries",
-                "--interop-output", "--cpp2il", "--sdk", "--keystore", "--key-alias"
+                "--interop-output", "--cpp2il", "--il2cppinterop-cli", "--sdk", "--keystore", "--key-alias"
             ],
             ["--policy"]);
         var keystore = parsed.Optional("--keystore");
@@ -161,6 +161,7 @@ public static class CliApplication
                 UnityLibrariesPath = parsed.Optional("--unity-libraries"),
                 InteropOutputPath = parsed.Optional("--interop-output"),
                 Cpp2IlPath = parsed.Optional("--cpp2il"),
+                Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli"),
                 AndroidSdkRoot = parsed.Optional("--sdk"),
                 Signing = signing
             }.NormalizeAndValidate();
@@ -229,30 +230,36 @@ public static class CliApplication
           LemonLoader.Patcher.CLI patch <input.apk> --output <output.apk> [options]
 
         Required:
+          <input.apk>                     Original ARM64 Unity IL2CPP APK
           --output <path>                 Output APK. The input APK is never overwritten.
 
-        Payload:
-          --release <path>                LemonLoader Android Release archive
+        Optional payload:
+          --release <path>                Local LemonLoader Release; otherwise latest/cache
           --deployment <directory>        MelonLoader mirror containing Mods, Plugins,
                                           UserLibs, UserData, or future top-level folders
-          --profile <name>                development, production, or locked
+          --profile <name>                development (default), production, or locked
           --policy <path=policy>          Deployment policy override; repeatable
 
-        Interop overrides:
+        Optional Interop overrides:
           --game-assembly <path>          libil2cpp.so override
           --metadata <path>               global-metadata.dat override
           --unity-version <version>       Unity version override
           --unity-libraries <directory>   Offline Unity managed reference assemblies
           --interop-output <directory>    Publish generated Interop assemblies
           --cpp2il <path>                 Cpp2IL executable override
+          --il2cppinterop-cli <path>      Built Il2CppInterop.CLI.dll override
 
-        Android output:
+        Android output and signing:
           --sdk <directory>               Android SDK root; otherwise uses ANDROID_SDK_ROOT
           --keystore <path>               Sign the APK with this keystore
-          --key-alias <name>              Signing key alias
+          --key-alias <name>              Required when --keystore is supplied
 
         Signing passwords are read from LEMONLOADER_KEYSTORE_PASSWORD and optional
-        LEMONLOADER_KEY_PASSWORD. Every output APK is zipaligned for 16 KiB pages.
+        LEMONLOADER_KEY_PASSWORD. Without --keystore, output is aligned but unsigned.
+        Every output APK is zipaligned for 16 KiB pages.
+
+        Global:
+          --verbose                       Include exception details on failure
         """;
 
     private const string UnityDependenciesHelp = """
@@ -261,6 +268,14 @@ public static class CliApplication
         Usage:
           LemonLoader.Patcher.CLI unity-dependencies <unity-version> --output <directory>
               [--cache <directory>]
+
+        Required:
+          <unity-version>                 Full Unity version, for example 6000.3.8f1
+          --output <directory>            Published Unity managed reference directory
+
+        Optional:
+          --cache <directory>             Download cache; defaults beside the output
+          --verbose                       Include exception details on failure
         """;
 }
 

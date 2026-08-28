@@ -18,6 +18,7 @@ public sealed record PatchRequest
     public string? UnityLibrariesPath { get; init; }
     public string? InteropOutputPath { get; init; }
     public string? Cpp2IlPath { get; init; }
+    public string? Il2CppInteropCliPath { get; init; }
     public string? AndroidSdkRoot { get; init; }
     public SigningOptions? Signing { get; init; }
 
@@ -44,6 +45,7 @@ public sealed record PatchRequest
             UnityLibrariesPath = OptionalPath(UnityLibrariesPath),
             InteropOutputPath = OptionalPath(InteropOutputPath),
             Cpp2IlPath = OptionalPath(Cpp2IlPath),
+            Il2CppInteropCliPath = OptionalPath(Il2CppInteropCliPath),
             AndroidSdkRoot = OptionalPath(AndroidSdkRoot),
             Signing = Signing is null
                 ? null
@@ -59,6 +61,13 @@ public sealed record PatchRequest
         {
             throw new DirectoryNotFoundException(
                 $"Deployment directory was not found at '{normalized.DeploymentPath}'.");
+        }
+        if (normalized.Il2CppInteropCliPath is { } interopCliPath)
+        {
+            if (!File.Exists(interopCliPath))
+                throw new ArgumentException($"Il2CppInterop CLI was not found at '{interopCliPath}'.");
+            if (!string.Equals(Path.GetExtension(interopCliPath), ".dll", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("The Il2CppInterop CLI override must be a managed .dll file.");
         }
         if (normalized.Signing is { } signing &&
             (string.IsNullOrWhiteSpace(signing.StorePassword) ||
