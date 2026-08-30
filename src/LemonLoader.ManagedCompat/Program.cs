@@ -74,8 +74,15 @@ var typeGetByName = typeof(Type).GetMethod(
     [typeof(string)])!;
 var importedGetByName = module.ImportReference(typeGetByName);
 
+var runtimeLocalBuilderReferences = instructions.Count(instruction =>
+    instruction.OpCode == OpCodes.Ldstr &&
+    string.Equals(instruction.Operand as string, runtimeLocalBuilderName, StringComparison.Ordinal));
+var localBuilderAlreadyPatched = runtimeMajor >= 10 &&
+    ((generatorType.Fields.Any(field => field.Name == "t_LocalBuilder") &&
+      runtimeLocalBuilderReferences == 1) ||
+     runtimeLocalBuilderReferences == 3);
 var replacements = 0;
-if (runtimeMajor >= 10)
+if (runtimeMajor >= 10 && !localBuilderAlreadyPatched)
 {
     for (var index = 0; index < instructions.Count - 1; index++)
     {
@@ -95,18 +102,6 @@ if (runtimeMajor >= 10)
         loadType.Operand = runtimeLocalBuilderName;
         getType.Operand = importedGetByName;
         replacements++;
-    }
-}
-
-var localBuilderAlreadyPatched = false;
-if (runtimeMajor >= 10 && replacements == 0)
-{
-    var patchedReferences = instructions.Count(instruction =>
-        instruction.OpCode == OpCodes.Ldstr &&
-        string.Equals(instruction.Operand as string, runtimeLocalBuilderName, StringComparison.Ordinal));
-    if (patchedReferences == 3)
-    {
-        localBuilderAlreadyPatched = true;
     }
 }
 

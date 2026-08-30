@@ -8,6 +8,9 @@ param(
     [ValidateSet("development", "production", "locked")]
     [string]$ExpectedDeploymentProfile,
 
+    [ValidateSet("monovm-sgen", "coreclr")]
+    [string]$ExpectedManagedRuntimeBackend,
+
     [string[]]$ExpectedDeploymentPolicy = @()
 )
 
@@ -113,7 +116,7 @@ function Get-PayloadTreeHash {
 }
 
 function Get-DeploymentRevision {
-    param([Parameter(Mandatory)] [object[]]$Files)
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Files)
 
     [string[]]$lines = @(
         $Files |
@@ -151,8 +154,7 @@ try {
     foreach ($required in @(
         "lib/arm64-v8a/libmain.so",
         "assets/LemonLoader/payload.json",
-        "assets/LemonLoader/runtime/dotnet/native/openssl/lemcrypto.so",
-        "assets/LemonLoader/runtime/dotnet/native/openssl/lemssl.so",
+        "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
         "assets/LemonLoader/runtime/interop/interop-manifest.json")) {
         if ($null -eq $archive.GetEntry($required)) {
             throw "APK is missing required LemonLoader entry '$required'."
@@ -165,15 +167,6 @@ try {
             throw "Private .NET dependency '$reserved' leaked into the public native namespace."
         }
     }
-    $documentation = $archive.Entries | Where-Object {
-        $_.FullName.StartsWith(
-            "assets/LemonLoader/runtime/loader/Documentation/",
-            [StringComparison]::Ordinal)
-    } | Select-Object -First 1
-    if ($null -ne $documentation) {
-        throw "APK contains forbidden loader Documentation '$($documentation.FullName)'."
-    }
-
     $payloadEntry = $archive.GetEntry("assets/LemonLoader/payload.json")
     $reader = [IO.StreamReader]::new($payloadEntry.Open(), [Text.Encoding]::UTF8)
     try {
@@ -182,8 +175,105 @@ try {
     finally {
         $reader.Dispose()
     }
-    if ($payload.formatVersion -ne 7) {
+    if ($payload.formatVersion -ne 8) {
         throw "APK payload.json has unsupported format '$($payload.formatVersion)'."
+    }
+    if ($payload.managedRuntimeBackend -notin @("monovm-sgen", "coreclr")) {
+        throw "APK managed runtime backend '$($payload.managedRuntimeBackend)' is invalid."
+    }
+    $privateLibraries = @($payload.privateNativeLibraries)
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedManagedRuntimeBackend) -and
+        $payload.managedRuntimeBackend -cne $ExpectedManagedRuntimeBackend) {
+        throw "APK managed runtime backend is '$($payload.managedRuntimeBackend)', expected '$ExpectedManagedRuntimeBackend'."
+    }
+    $runtimeIdentityEntry = $archive.GetEntry(
+        "assets/LemonLoader/runtime/dotnet/runtime-identity.json")
+    $actualRuntimeIdentityHash = Get-EntrySha256 -Entry $runtimeIdentityEntry
+    if ($payload.managedRuntimeIdentitySha256 -cne $actualRuntimeIdentityHash) {
+        throw "APK managed runtime identity hash is '$($payload.managedRuntimeIdentitySha256)', expected '$actualRuntimeIdentityHash'."
+    }
+    $runtimeIdentityReader = [IO.StreamReader]::new(
+        $runtimeIdentityEntry.Open(),
+        [Text.Encoding]::UTF8)
+    try {
+        $runtimeIdentity = $runtimeIdentityReader.ReadToEnd() | ConvertFrom-Json
+    }
+    finally {
+        $runtimeIdentityReader.Dispose()
+    }
+    $expectedHostingModel = if ($payload.managedRuntimeBackend -ceq "coreclr") {
+        "coreclr-host-api"
+    }
+    else {
+        "hostfxr"
+    }
+    if ($runtimeIdentity.formatVersion -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$runtimeIdentity.runtimeVersion) -or
+        $runtimeIdentity.backend -cne $payload.managedRuntimeBackend -or
+        $runtimeIdentity.hostingModel -cne $expectedHostingModel -or
+        $runtimeIdentity.engineFile -cne "libcoreclr.so" -or
+        ([string]$runtimeIdentity.engineSha256) -notmatch '^[0-9a-fA-F]{64}$') {
+        throw "APK managed runtime identity is invalid or inconsistent with payload.json."
+    }
+    $runtimeEngineEntry = $archive.GetEntry(
+        "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/" +
+        "$($runtimeIdentity.runtimeVersion)/libcoreclr.so")
+    if ($null -eq $runtimeEngineEntry) {
+        throw "APK managed runtime engine declared by identity is missing."
+    }
+    $actualRuntimeEngineHash = Get-EntrySha256 -Entry $runtimeEngineEntry
+    if ($runtimeIdentity.engineSha256 -cne $actualRuntimeEngineHash) {
+        throw "APK managed runtime engine hash is '$($runtimeIdentity.engineSha256)', expected '$actualRuntimeEngineHash'."
+    }
+    $sharedRuntimeRoot = "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/" +
+        "$($runtimeIdentity.runtimeVersion)"
+    $androidCryptoEntry = $archive.GetEntry(
+        "$sharedRuntimeRoot/libSystem.Security.Cryptography.Native.Android.so")
+    $coreClrCryptoDexHash = [string]$payload.coreClrCryptoDexSha256
+    if ($payload.managedRuntimeBackend -ceq "coreclr") {
+        if ($null -eq $androidCryptoEntry -or
+            $coreClrCryptoDexHash -notmatch '^[0-9a-f]{64}$') {
+            throw "APK CoreCLR payload is missing its Android crypto library or helper dex hash."
+        }
+        if ("lemcrypto.so" -cin $privateLibraries -or
+            "lemssl.so" -cin $privateLibraries) {
+            throw "APK CoreCLR payload still declares private OpenSSL dependencies."
+        }
+        $staleOpenSslEntry = $archive.Entries | Where-Object {
+            $_.FullName.StartsWith(
+                "assets/LemonLoader/runtime/dotnet/native/openssl/",
+                [StringComparison]::Ordinal) -or
+            $_.FullName.EndsWith(
+                "/libSystem.Security.Cryptography.Native.OpenSsl.so",
+                [StringComparison]::Ordinal)
+        } | Select-Object -First 1
+        if ($null -ne $staleOpenSslEntry) {
+            throw "APK CoreCLR payload contains stale OpenSSL entry '$($staleOpenSslEntry.FullName)'."
+        }
+
+        $promotedDexEntries = @($archive.Entries | Where-Object {
+            $_.FullName -match '^classes(?:(?:[2-9][0-9]*|1[0-9]+))?\.dex$' -and
+            (Get-EntrySha256 -Entry $_) -ceq $coreClrCryptoDexHash
+        })
+        if ($promotedDexEntries.Count -ne 1 -or
+            $promotedDexEntries[0].FullName -ceq "classes.dex") {
+            throw "APK does not contain exactly one promoted Android CoreCLR crypto dex."
+        }
+    }
+    else {
+        if (-not [string]::IsNullOrEmpty($coreClrCryptoDexHash)) {
+            throw "APK MonoVM/SGen payload contains CoreCLR crypto helper dex metadata."
+        }
+        $expectedPrivateLibraries = @("lemcrypto.so", "lemssl.so")
+        if (@($expectedPrivateLibraries | Where-Object { $_ -cnotin $privateLibraries }).Count -ne 0) {
+            throw "APK MonoVM/SGen payload does not declare its private OpenSSL compatibility pair."
+        }
+        foreach ($privateLibrary in $expectedPrivateLibraries) {
+            $privateEntry = "assets/LemonLoader/runtime/dotnet/native/openssl/$privateLibrary"
+            if ($null -eq $archive.GetEntry($privateEntry)) {
+                throw "APK is missing private native dependency '$privateEntry'."
+            }
+        }
     }
     $loaderHash = Get-PayloadTreeHash -Archive $archive -Scope "runtime/loader" `
         -LayoutVersion $payload.formatVersion
@@ -305,7 +395,7 @@ try {
         throw "APK contains no generated Interop assemblies."
     }
 
-    Write-Host "Verified LemonLoader APK layout v7:"
+    Write-Host "Verified LemonLoader APK layout v8:"
     Write-Host "  $apk"
     Write-Host "  Interop assemblies: $interopCount"
     Write-Host "  Expected deployment files: $($expectedDeploymentFiles.Count)"

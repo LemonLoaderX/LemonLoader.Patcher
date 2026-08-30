@@ -2,15 +2,39 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 
+internal enum ManagedRuntimeBackend
+{
+    MonoVmSgen,
+    CoreClr
+}
+
 internal static class AndroidPayloadContract
 {
-    public const int FormatVersion = 7;
+    public const int FormatVersion = 8;
     public const string PayloadRoot = "assets/LemonLoader";
     public const string LoaderRoot = $"{PayloadRoot}/runtime/loader";
     public const string DotnetRoot = $"{PayloadRoot}/runtime/dotnet";
     public const string InteropRoot = $"{PayloadRoot}/runtime/interop";
     public const string DeploymentRoot = $"{PayloadRoot}/deployment";
     public const string PayloadManifestPath = $"{PayloadRoot}/payload.json";
+    public const string CoreClrCryptoDexFileName = "lemonloader-coreclr-crypto.dex";
+    public const string CoreClrCryptoDexReleasePath =
+        $"tools/android/{CoreClrCryptoDexFileName}";
+
+    public static ManagedRuntimeBackend ParseManagedRuntimeBackend(string? value) => value switch
+    {
+        "monovm-sgen" => ManagedRuntimeBackend.MonoVmSgen,
+        "coreclr" => ManagedRuntimeBackend.CoreClr,
+        _ => throw new InvalidDataException(
+            $"Unsupported Android managed runtime backend '{value ?? "<null>"}'.")
+    };
+
+    public static string GetManagedRuntimeBackendName(ManagedRuntimeBackend backend) => backend switch
+    {
+        ManagedRuntimeBackend.MonoVmSgen => "monovm-sgen",
+        ManagedRuntimeBackend.CoreClr => "coreclr",
+        _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, null)
+    };
 
     public static string ComputeTreeHash(ZipArchive archive, string scope)
     {
@@ -69,9 +93,6 @@ internal static class AndroidPayloadContract
         }
         return HashLines(lines);
     }
-
-    public static bool IsForbiddenReleasePath(string path) =>
-        path.StartsWith($"{LoaderRoot}/Documentation/", StringComparison.Ordinal);
 
     public static bool IsRuntimeDomainPath(string path) =>
         path.StartsWith($"{LoaderRoot}/", StringComparison.Ordinal) ||

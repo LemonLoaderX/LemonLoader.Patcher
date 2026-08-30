@@ -28,7 +28,8 @@ internal static class PayloadAssembler
         ValidatePrivateNativeLibraries(archive, payload.PrivateNativeLibraries);
         RejectExistingLoaderPayload(archive);
         AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets");
-        ValidateNoForbiddenRuntimeEntries(archive);
+        AddCoreClrCryptoDex(archive, source.ReleaseRoot, payload);
+        ValidateRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"));
         foreach (var dll in Directory.GetFiles(source.InteropRoot, "*.dll"))
         {
@@ -80,9 +81,9 @@ internal static class PayloadAssembler
         Directory.CreateDirectory(workRoot);
         try
         {
-            var originalNativeEntries = CreateDirectorySeedApk(gameRoot, stagingApk);
+            var originalEntries = CreateDirectorySeedApk(gameRoot, stagingApk);
             MergeApk(stagingApk, source);
-            ExtractDirectoryOverlay(stagingApk, overlayRoot, originalNativeEntries);
+            ExtractDirectoryOverlay(stagingApk, overlayRoot, originalEntries);
             DirectoryInjector.Apply(gameRoot, overlayRoot, progress);
         }
         finally
@@ -123,6 +124,8 @@ internal static class PayloadAssembler
         var entryNames = Directory.GetFiles(nativeRoot, "*", SearchOption.TopDirectoryOnly)
             .Select(path => $"{GamePackageLayout.Arm64LibraryRoot}/{Path.GetFileName(path)}")
             .ToHashSet(StringComparer.Ordinal);
+        foreach (var dexPath in Directory.GetFiles(gameRoot, "classes*.dex", SearchOption.TopDirectoryOnly))
+            entryNames.Add(Path.GetFileName(dexPath));
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Create);
         foreach (var entryName in entryNames.OrderBy(name => name, StringComparer.Ordinal))
             archive.CreateEntry(entryName, CompressionLevel.NoCompression);
@@ -132,7 +135,7 @@ internal static class PayloadAssembler
     private static void ExtractDirectoryOverlay(
         string apkPath,
         string overlayRoot,
-        IReadOnlySet<string> originalNativeEntries)
+        IReadOnlySet<string> originalEntries)
     {
         Directory.CreateDirectory(overlayRoot);
         using var archive = ZipFile.OpenRead(apkPath);
@@ -141,7 +144,7 @@ internal static class PayloadAssembler
             Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
         {
-            if (originalNativeEntries.Contains(entry.FullName) &&
+            if (originalEntries.Contains(entry.FullName) &&
                 entry.FullName != GamePackageLayout.MainLibrary)
             {
                 continue;
@@ -227,10 +230,31 @@ internal static class PayloadAssembler
         }
         if (descriptor.DeploymentFiles is null ||
             descriptor.DeploymentProfile is null ||
-            descriptor.DeploymentRevisionSha256 is null)
+            descriptor.DeploymentRevisionSha256 is null ||
+            descriptor.ManagedRuntimeBackend is null ||
+            descriptor.ManagedRuntimeIdentitySha256 is null ||
+            descriptor.PrivateNativeLibraries is null)
         {
             throw new InvalidDataException(
-                "Android payload manifest does not define deployment policy metadata.");
+                "Android payload manifest does not define runtime identity or deployment policy metadata.");
+        }
+        var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
+            descriptor.ManagedRuntimeBackend);
+        if (!IsSha256(descriptor.ManagedRuntimeIdentitySha256))
+            throw new InvalidDataException(
+                "Android payload manifest contains an invalid managed runtime identity hash.");
+        if (runtimeBackend == ManagedRuntimeBackend.CoreClr &&
+            (descriptor.CoreClrCryptoDexSha256 is null ||
+             !IsSha256(descriptor.CoreClrCryptoDexSha256)))
+        {
+            throw new InvalidDataException(
+                "Android CoreCLR payload manifest contains no valid crypto helper dex hash.");
+        }
+        if (runtimeBackend == ManagedRuntimeBackend.MonoVmSgen &&
+            descriptor.CoreClrCryptoDexSha256 is not null)
+        {
+            throw new InvalidDataException(
+                "Android MonoVM/SGen payload manifest declares a CoreCLR crypto helper dex.");
         }
         if (descriptor.PrivateNativeLibraries.Any(name =>
                 string.IsNullOrWhiteSpace(name) ||
@@ -244,6 +268,9 @@ internal static class PayloadAssembler
         return descriptor;
     }
 
+    private static bool IsSha256(string value) =>
+        value.Length == 64 && value.All(Uri.IsHexDigit);
+
     private static void ValidateUniqueEntries(ZipArchive archive)
     {
         var duplicate = archive.Entries
@@ -253,16 +280,8 @@ internal static class PayloadAssembler
             throw new InvalidDataException($"APK contains duplicate ZIP entry '{duplicate.Key}'.");
     }
 
-    private static void ValidateNoForbiddenRuntimeEntries(ZipArchive archive)
+    private static void ValidateRuntimeEntries(ZipArchive archive)
     {
-        var forbidden = archive.Entries.FirstOrDefault(entry =>
-            AndroidPayloadContract.IsForbiddenReleasePath(entry.FullName));
-        if (forbidden is not null)
-        {
-            throw new InvalidDataException(
-                $"Android payload must not contain loader documentation '{forbidden.FullName}'.");
-        }
-
         var unsupported = archive.Entries.FirstOrDefault(entry =>
             !string.IsNullOrEmpty(entry.Name) &&
             entry.FullName.StartsWith(
@@ -386,6 +405,59 @@ internal static class PayloadAssembler
         }
     }
 
+    private static void AddCoreClrCryptoDex(
+        ZipArchive archive,
+        string releaseRoot,
+        PayloadDescriptor descriptor)
+    {
+        if (descriptor.CoreClrCryptoDexSha256 is null)
+            return;
+
+        var cryptoDex = GamePackageLayout.FilePath(
+            releaseRoot,
+            AndroidPayloadContract.CoreClrCryptoDexReleasePath);
+        RequireFile(cryptoDex, "Android CoreCLR crypto helper dex");
+        using (var input = File.OpenRead(cryptoDex))
+        {
+            var actualHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            if (!string.Equals(
+                    actualHash,
+                    descriptor.CoreClrCryptoDexSha256,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "The Android CoreCLR crypto helper dex does not match payload.json.");
+            }
+        }
+
+        var dexIndices = archive.Entries
+            .Where(entry => !entry.FullName.Contains('/'))
+            .Select(entry => ParseDexIndex(entry.FullName))
+            .Where(index => index is not null)
+            .Select(index => index!.Value)
+            .ToArray();
+        if (!dexIndices.Contains(1))
+        {
+            throw new InvalidDataException(
+                "The input Android package has no primary classes.dex for the CoreCLR crypto bridge.");
+        }
+        var nextIndex = checked(dexIndices.Max() + 1);
+        AddFile(archive, cryptoDex, $"classes{nextIndex}.dex");
+    }
+
+    private static int? ParseDexIndex(string entryName)
+    {
+        if (entryName == "classes.dex")
+            return 1;
+        if (!entryName.StartsWith("classes", StringComparison.Ordinal) ||
+            !entryName.EndsWith(".dex", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var value = entryName["classes".Length..(entryName.Length - ".dex".Length)];
+        return int.TryParse(value, out var index) && index >= 2 ? index : null;
+    }
+
     private static void AddDeploymentRoot(ZipArchive archive, string sourcePath)
     {
         if (!Directory.Exists(sourcePath))
@@ -457,6 +529,9 @@ internal static class PayloadAssembler
 
     private sealed record PayloadDescriptor(
         int FormatVersion,
+        string ManagedRuntimeBackend,
+        string ManagedRuntimeIdentitySha256,
+        string? CoreClrCryptoDexSha256,
         string LoaderSha256,
         string DotnetSha256,
         string InteropSha256,

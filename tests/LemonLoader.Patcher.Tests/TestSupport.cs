@@ -53,9 +53,11 @@ internal static class TestSupport
 
     public static string CreateReleaseTree(
         string root,
-        IReadOnlyList<string>? privateNativeLibraries = null)
+        IReadOnlyList<string>? privateNativeLibraries = null,
+        bool includeCoreClrCryptoDex = false)
     {
         var releaseRoot = Path.Combine(root, $"release-{Guid.NewGuid():N}");
+        var runtimeBackend = includeCoreClrCryptoDex ? "coreclr" : "monovm-sgen";
         WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
         WritePayload(
             releaseRoot,
@@ -65,10 +67,30 @@ internal static class TestSupport
             releaseRoot,
             "assets/LemonLoader/runtime/dotnet/host/fxr/10.0.10/libhostfxr.so",
             "hostfxr");
-        WritePayload(
+        var runtimeEngineHash = WritePayload(
             releaseRoot,
             "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
-            "coreclr");
+            "coreclr").Hash;
+        var runtimeIdentity = WritePayload(
+            releaseRoot,
+            "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
+            JsonSerializer.Serialize(new
+            {
+                formatVersion = 1,
+                runtimeVersion = "10.0.10",
+                backend = runtimeBackend,
+                hostingModel = includeCoreClrCryptoDex ? "coreclr-host-api" : "hostfxr",
+                engineFile = "libcoreclr.so",
+                engineSha256 = runtimeEngineHash
+            }));
+        string? coreClrCryptoDexSha256 = null;
+        if (includeCoreClrCryptoDex)
+        {
+            coreClrCryptoDexSha256 = WritePayload(
+                releaseRoot,
+                AndroidPayloadContract.CoreClrCryptoDexReleasePath,
+                "crypto-dex").Hash;
+        }
         foreach (var library in privateNativeLibraries ?? [])
         {
             WritePayload(
@@ -86,6 +108,9 @@ internal static class TestSupport
                 dotnetSha256 = new string('0', 64),
                 interopSha256 = new string('0', 64),
                 deploymentSha256 = new string('0', 64),
+                managedRuntimeBackend = runtimeBackend,
+                managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
+                coreClrCryptoDexSha256,
                 deploymentProfile = "development",
                 deploymentRevisionSha256 = ComputeDeploymentRevision([]),
                 deploymentFiles = Array.Empty<object>(),

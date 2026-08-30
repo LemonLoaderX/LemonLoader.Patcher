@@ -17,7 +17,7 @@ internal static class ReleaseValidator
 
         using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var manifest = document.RootElement;
-        if (manifest.GetProperty("formatVersion").GetInt32() != 1)
+        if (manifest.GetProperty("formatVersion").GetInt32() != 2)
             throw new InvalidDataException("Unsupported LemonLoader Release manifest format.");
         if (manifest.GetProperty("assetLayoutVersion").GetInt32() != AssetLayoutVersion)
             throw new InvalidDataException("Unsupported LemonLoader Android asset layout.");
@@ -78,27 +78,74 @@ internal static class ReleaseValidator
         IReadOnlySet<string> files,
         JsonElement releaseManifest)
     {
-        var runtimeVersion = releaseManifest.GetProperty("dotnetRuntimeVersion").GetString();
-        var runtimeRevision = releaseManifest.GetProperty("dotnetRuntimeRevision").GetString();
-        var coreClrHash = releaseManifest.GetProperty("coreClrSha256").GetString();
+        var runtimeVersion = releaseManifest.GetProperty("managedRuntimeVersion").GetString();
+        var configuration = releaseManifest.GetProperty("configuration").GetString();
+        var runtimeBackendName = releaseManifest.GetProperty("managedRuntimeBackend").GetString();
+        var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(runtimeBackendName);
+        var runtimeHostingModel = runtimeBackend == ManagedRuntimeBackend.CoreClr
+            ? "coreclr-host-api"
+            : "hostfxr";
+        var runtimeRevision = releaseManifest.GetProperty("managedRuntimeSourceRevision").GetString();
+        var runtimeEngineFile = releaseManifest.GetProperty("managedRuntimeEngineFile").GetString();
+        var runtimeEngineHash = releaseManifest.GetProperty("managedRuntimeEngineSha256").GetString();
+        var runtimeThreadFilterAvailable =
+            releaseManifest.GetProperty("managedRuntimeThreadFilterAvailable").GetBoolean();
         if (string.IsNullOrWhiteSpace(runtimeVersion) ||
+            configuration is not ("Debug" or "Release") ||
             runtimeRevision is null || runtimeRevision.Length != 40 ||
             runtimeRevision.Any(character => !Uri.IsHexDigit(character)) ||
-            coreClrHash is null || coreClrHash.Length != 64 ||
-            coreClrHash.Any(character => !Uri.IsHexDigit(character)))
+            runtimeEngineFile != "libcoreclr.so" ||
+            runtimeEngineHash is null || runtimeEngineHash.Length != 64 ||
+            runtimeEngineHash.Any(character => !Uri.IsHexDigit(character)) ||
+            (runtimeBackend == ManagedRuntimeBackend.MonoVmSgen && !runtimeThreadFilterAvailable) ||
+            (runtimeBackend == ManagedRuntimeBackend.CoreClr && runtimeThreadFilterAvailable))
         {
-            throw new InvalidDataException("The Release does not contain valid CoreCLR source provenance.");
+            throw new InvalidDataException(
+                "The Release does not contain valid managed runtime source provenance.");
         }
-        var coreClrPath = $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libcoreclr.so";
-        if (!files.Contains(coreClrPath))
-            throw new InvalidDataException("The Release CoreCLR file is missing.");
+        var runtimeEnginePath =
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/{runtimeEngineFile}";
+        if (!files.Contains(runtimeEnginePath))
+            throw new InvalidDataException("The Release managed runtime engine is missing.");
         using (var input = File.OpenRead(Path.Combine(
                    root,
-                   coreClrPath.Replace('/', Path.DirectorySeparatorChar))))
+                   runtimeEnginePath.Replace('/', Path.DirectorySeparatorChar))))
         {
-            var actualCoreClrHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            if (!string.Equals(coreClrHash, actualCoreClrHash, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("The Release CoreCLR hash does not match its source provenance.");
+            var actualRuntimeEngineHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            if (!string.Equals(
+                    runtimeEngineHash,
+                    actualRuntimeEngineHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "The Release managed runtime engine hash does not match its source provenance.");
+            }
+        }
+
+        var runtimeIdentityPath =
+            $"{AndroidPayloadContract.DotnetRoot}/runtime-identity.json";
+        if (!files.Contains(runtimeIdentityPath))
+            throw new InvalidDataException("The Release managed runtime identity file is missing.");
+        var runtimeIdentityFile = Path.Combine(
+            root,
+            runtimeIdentityPath.Replace('/', Path.DirectorySeparatorChar));
+        using (var runtimeIdentityDocument = JsonDocument.Parse(
+                   File.ReadAllText(runtimeIdentityFile)))
+        {
+            var identity = runtimeIdentityDocument.RootElement;
+            if (identity.GetProperty("formatVersion").GetInt32() != 1 ||
+                identity.GetProperty("runtimeVersion").GetString() != runtimeVersion ||
+                identity.GetProperty("backend").GetString() != runtimeBackendName ||
+                identity.GetProperty("hostingModel").GetString() != runtimeHostingModel ||
+                identity.GetProperty("engineFile").GetString() != runtimeEngineFile ||
+                !string.Equals(
+                    identity.GetProperty("engineSha256").GetString(),
+                    runtimeEngineHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "The managed runtime identity file does not match the Release manifest.");
+            }
         }
 
         var invalidAsset = files.FirstOrDefault(path =>
@@ -107,11 +154,6 @@ internal static class ReleaseValidator
         if (invalidAsset is not null)
             throw new InvalidDataException(
                 $"Release asset '{invalidAsset}' is outside the consolidated assets/LemonLoader tree.");
-
-        var documentation = files.FirstOrDefault(AndroidPayloadContract.IsForbiddenReleasePath);
-        if (documentation is not null)
-            throw new InvalidDataException(
-                $"Android Release must not contain loader documentation '{documentation}'.");
 
         var publicNativeLibraries = files
             .Where(path => path.StartsWith("lib/arm64-v8a/", StringComparison.Ordinal))
@@ -126,6 +168,27 @@ internal static class ReleaseValidator
         var payload = payloadDocument.RootElement;
         if (payload.GetProperty("formatVersion").GetInt32() != AssetLayoutVersion)
             throw new InvalidDataException("The Android payload manifest has an unsupported format version.");
+        var payloadRuntimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
+            payload.GetProperty("managedRuntimeBackend").GetString());
+        var payloadRuntimeIdentityHash =
+            payload.GetProperty("managedRuntimeIdentitySha256").GetString();
+        using (var input = File.OpenRead(runtimeIdentityFile))
+        {
+            var actualRuntimeIdentityHash =
+                Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            if (payloadRuntimeBackend != runtimeBackend ||
+                payloadRuntimeIdentityHash is null ||
+                payloadRuntimeIdentityHash.Length != 64 ||
+                payloadRuntimeIdentityHash.Any(character => !Uri.IsHexDigit(character)) ||
+                !string.Equals(
+                    payloadRuntimeIdentityHash,
+                    actualRuntimeIdentityHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    "The payload managed runtime identity does not match the Release file.");
+            }
+        }
         var deploymentHash = payload.GetProperty("deploymentSha256").GetString();
         var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(root, "deployment");
         if (deploymentHash is null || deploymentHash.Length != 64 ||
@@ -178,18 +241,82 @@ internal static class ReleaseValidator
                 "A game-independent Release has an invalid empty deployment revision.");
         }
 
-        var privateLibraries = payload.GetProperty("privateNativeLibraries")
+        var privateLibrariesProperty = payload.GetProperty("privateNativeLibraries");
+        if (privateLibrariesProperty.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException(
+                "The Android payload manifest private native library list is not an array.");
+        var privateLibraries = privateLibrariesProperty
             .EnumerateArray()
-            .Select(value => value.GetString())
+            .Select(value => value.GetString() ?? throw new InvalidDataException(
+                "The Android payload manifest contains a null private native library name."))
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var library in new[] { "lemcrypto.so", "lemssl.so" })
+        var sharedRuntimeRoot =
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}";
+        var androidCryptoPath =
+            $"{sharedRuntimeRoot}/libSystem.Security.Cryptography.Native.Android.so";
+        var androidCryptoDexPath = AndroidPayloadContract.CoreClrCryptoDexReleasePath;
+        var privateOpenSslRoot = "assets/LemonLoader/runtime/dotnet/native/openssl/";
+        var coreClrCryptoDexHash = payload.GetProperty("coreClrCryptoDexSha256");
+        if (runtimeBackend == ManagedRuntimeBackend.CoreClr)
         {
-            if (!privateLibraries.Contains(library) ||
-                !files.Contains($"assets/LemonLoader/runtime/dotnet/native/openssl/{library}"))
+            if (!files.Contains(androidCryptoPath) || !files.Contains(androidCryptoDexPath))
             {
                 throw new InvalidDataException(
-                    $"The private Android OpenSSL dependency '{library}' is missing or undeclared.");
+                    "The Android CoreCLR Release is missing its source-built crypto library or helper dex.");
             }
+            var expectedCryptoDexHash = coreClrCryptoDexHash.GetString();
+            if (expectedCryptoDexHash is null || !IsSha256(expectedCryptoDexHash))
+                throw new InvalidDataException(
+                    "The Android CoreCLR payload has an invalid crypto helper dex hash.");
+            using (var input = File.OpenRead(Path.Combine(
+                       root,
+                       androidCryptoDexPath.Replace('/', Path.DirectorySeparatorChar))))
+            {
+                var actualCryptoDexHash =
+                    Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+                if (!string.Equals(
+                        expectedCryptoDexHash,
+                        actualCryptoDexHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        "The Android CoreCLR crypto helper dex hash does not match payload.json.");
+                }
+            }
+            if (privateLibraries.Contains("lemcrypto.so") ||
+                privateLibraries.Contains("lemssl.so"))
+                throw new InvalidDataException(
+                    "The Android CoreCLR Release must not declare private OpenSSL dependencies.");
+
+            var staleOpenSsl = files.FirstOrDefault(path =>
+                path.StartsWith(privateOpenSslRoot, StringComparison.Ordinal) ||
+                path.EndsWith(
+                    "/libSystem.Security.Cryptography.Native.OpenSsl.so",
+                    StringComparison.Ordinal));
+            if (staleOpenSsl is not null)
+                throw new InvalidDataException(
+                    $"The Android CoreCLR Release contains stale OpenSSL payload '{staleOpenSsl}'.");
+            return;
+        }
+
+        if (coreClrCryptoDexHash.ValueKind != JsonValueKind.Null ||
+            files.Contains(androidCryptoDexPath))
+        {
+            throw new InvalidDataException(
+                "The Android MonoVM/SGen Release contains CoreCLR crypto helper dex metadata.");
+        }
+
+        var expectedPrivateLibraries = new HashSet<string>(
+            ["lemcrypto.so", "lemssl.so"],
+            StringComparer.Ordinal);
+        if (!expectedPrivateLibraries.IsSubsetOf(privateLibraries))
+            throw new InvalidDataException(
+                "The Android MonoVM/SGen Release must declare its isolated OpenSSL compatibility pair.");
+        foreach (var library in expectedPrivateLibraries)
+        {
+            if (!files.Contains($"{privateOpenSslRoot}{library}"))
+                throw new InvalidDataException(
+                    $"The private Android OpenSSL dependency '{library}' is missing.");
         }
     }
 
@@ -216,4 +343,7 @@ internal static class ReleaseValidator
             throw new InvalidDataException($"Release manifest path '{relativePath}' escapes the Release root.");
         return fullPath;
     }
+
+    private static bool IsSha256(string value) =>
+        value.Length == 64 && value.All(Uri.IsHexDigit);
 }

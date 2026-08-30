@@ -313,10 +313,14 @@ uploaded.
 Binary releases are published at
 `https://github.com/anosu/LemonLoader.Patcher/releases`.
 
-The current Release contract is asset layout v7 with
+The current Release contract is asset layout v8 with
 `assets/LemonLoader/payload.json`. Runtime loader, dotnet, Interop, and packaged
 deployment content use independent hashes. Release and APK validation hash their
 complete contents; normal device startup trusts the installed domain marker and
-does not rescan the private runtime. `runtime/loader/Documentation` is not valid
-Android payload content. Native entry replacement is limited to `libmain.so`;
+does not rescan the private runtime. Published payloads contain the minimal
+`runtime-identity.json`; full build provenance and build commands remain outside
+the Release. Validators require the fields they consume and tolerate additive
+JSON metadata and files instead of maintaining content blacklists. Android
+staging, rather than Patcher, decides whether desktop-only material is published.
+Native entry replacement is limited to `libmain.so`;
 private .NET native dependencies remain isolated from game-owned libraries.

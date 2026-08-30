@@ -282,7 +282,9 @@ static async Task TestUnityDependencySourceFallbackAsync()
 
 static Task TestReleaseValidationAsync()
 {
-    var root = CreateTestRoot();
+    var testRoot = CreateTestRoot();
+    var root = Path.Combine(testRoot, "monovm-release");
+    Directory.CreateDirectory(root);
     try
     {
         var files = new List<(string Path, long Size, string Hash)>
@@ -290,11 +292,28 @@ static Task TestReleaseValidationAsync()
             WritePayload(root, "lib/arm64-v8a/libmain.so", "bootstrap"),
             WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/openssl/lemcrypto.so", "crypto"),
             WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/openssl/lemssl.so", "ssl"),
+            WritePayload(root, "assets/LemonLoader/runtime/dotnet/native/optional/future.so", "future"),
             WritePayload(
                 root,
                 "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
                 "coreclr")
         };
+        var runtimeBackend = "monovm-sgen";
+        var runtimeRevision = new string('1', 40);
+        var runtimeEngineHash = files.Single(file => file.Path.EndsWith("/libcoreclr.so")).Hash;
+        var runtimeIdentity = WritePayload(
+            root,
+            "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
+            JsonSerializer.Serialize(new
+            {
+                formatVersion = 1,
+                runtimeVersion = "10.0.10",
+                backend = runtimeBackend,
+                hostingModel = "hostfxr",
+                engineFile = "libcoreclr.so",
+                engineSha256 = runtimeEngineHash
+            }));
+        files.Add(runtimeIdentity);
         files.Add(WritePayload(
             root,
             "assets/LemonLoader/payload.json",
@@ -305,20 +324,26 @@ static Task TestReleaseValidationAsync()
                 dotnetSha256 = ComputePayloadDirectoryHash(root, "runtime/dotnet"),
                 interopSha256 = ComputePayloadDirectoryHash(root, "runtime/interop"),
                 deploymentSha256 = ComputePayloadDirectoryHash(root, "deployment"),
+                managedRuntimeBackend = runtimeBackend,
+                managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
+                coreClrCryptoDexSha256 = (string?)null,
                 deploymentProfile = "development",
                 deploymentRevisionSha256 = ComputeDeploymentRevision([]),
                 deploymentFiles = Array.Empty<object>(),
-                privateNativeLibraries = new[] { "lemcrypto.so", "lemssl.so" }
+                privateNativeLibraries = new[] { "lemcrypto.so", "lemssl.so", "future.so" }
             })));
-        var coreClrHash = files.Single(file => file.Path.EndsWith("/libcoreclr.so")).Hash;
         var manifest = new Dictionary<string, object>
         {
-            ["formatVersion"] = 1,
+            ["formatVersion"] = 2,
             ["assetLayoutVersion"] = AndroidPayloadContract.FormatVersion,
+            ["configuration"] = "Release",
             ["gameAssembliesIncluded"] = false,
-            ["dotnetRuntimeVersion"] = "10.0.10",
-            ["dotnetRuntimeRevision"] = new string('1', 40),
-            ["coreClrSha256"] = coreClrHash,
+            ["managedRuntimeVersion"] = "10.0.10",
+            ["managedRuntimeBackend"] = runtimeBackend,
+            ["managedRuntimeSourceRevision"] = runtimeRevision,
+            ["managedRuntimeEngineFile"] = "libcoreclr.so",
+            ["managedRuntimeEngineSha256"] = runtimeEngineHash,
+            ["managedRuntimeThreadFilterAvailable"] = true,
             ["files"] = files.Select(file => new
             {
                 path = file.Path,
@@ -330,25 +355,53 @@ static Task TestReleaseValidationAsync()
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
         ReleaseValidator.Validate(root);
 
-        manifest["coreClrSha256"] = new string('0', 64);
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
-        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
-        manifest["coreClrSha256"] = coreClrHash;
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
+            CreateCoreClrReleaseFixture(testRoot, includeAndroidCrypto: false)));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
+            CreateCoreClrReleaseFixture(testRoot, includeCryptoDex: false)));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeLegacyRuntimeCryptoDex: true));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeDiagnosticLibraries: true));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeLoaderDocumentation: true));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
+            CreateCoreClrReleaseFixture(testRoot, privateNativeLibraries: ["lemcrypto.so"])));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            privateNativeLibraries: ["future.so"]));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
+            CreateCoreClrReleaseFixture(testRoot, includeStaleOpenSsl: true)));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeAdditionalRuntimeMetadataFile: true));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeAdditionalIdentityProperty: true));
 
-        manifest["dotnetRuntimeRevision"] = "not-a-source-revision";
+        manifest["producer"] = "fixture";
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
-        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
-        manifest["dotnetRuntimeRevision"] = new string('1', 40);
-        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
+        ReleaseValidator.Validate(root);
+        manifest.Remove("producer");
 
-        var documentation = WritePayload(
-            root,
-            "assets/LemonLoader/runtime/loader/Documentation/README.md",
-            "not for Android");
+        manifest["managedRuntimeEngineSha256"] = new string('0', 64);
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
-        File.Delete(Path.Combine(
-            root,
-            documentation.Path.Replace('/', Path.DirectorySeparatorChar)));
+        manifest["managedRuntimeEngineSha256"] = runtimeEngineHash;
+
+        manifest["managedRuntimeSourceRevision"] = "not-a-source-revision";
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
+        manifest["managedRuntimeSourceRevision"] = runtimeRevision;
+        manifest["managedRuntimeBackend"] = "not-a-runtime";
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
+        manifest["managedRuntimeBackend"] = runtimeBackend;
+        File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
 
         File.AppendAllText(Path.Combine(root, "lib", "arm64-v8a", "libmain.so"), "corrupt");
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(root));
@@ -358,9 +411,156 @@ static Task TestReleaseValidationAsync()
     }
     finally
     {
-        Directory.Delete(root, true);
+        Directory.Delete(testRoot, true);
     }
     return Task.CompletedTask;
+}
+
+static string CreateCoreClrReleaseFixture(
+    string root,
+    bool includeAndroidCrypto = true,
+    bool includeCryptoDex = true,
+    IReadOnlyList<string>? privateNativeLibraries = null,
+    bool includeStaleOpenSsl = false,
+    bool includeLegacyRuntimeCryptoDex = false,
+    bool includeDiagnosticLibraries = false,
+    bool includeLoaderDocumentation = false,
+    bool includeAdditionalRuntimeMetadataFile = false,
+    bool includeAdditionalIdentityProperty = false)
+{
+    const string runtimeVersion = "10.0.10";
+    const string runtimeBackend = "coreclr";
+    var runtimeRevision = new string('2', 40);
+    var releaseRoot = Path.Combine(root, $"coreclr-release-{Guid.NewGuid():N}");
+    var files = new List<(string Path, long Size, string Hash)>
+    {
+        WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "bootstrap"),
+        WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libcoreclr.so",
+            "coreclr")
+    };
+    if (includeAndroidCrypto)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libSystem.Security.Cryptography.Native.Android.so",
+            "android-crypto"));
+    }
+    string? coreClrCryptoDexSha256 = null;
+    if (includeCryptoDex)
+    {
+        var cryptoDex = WritePayload(
+            releaseRoot,
+            AndroidPayloadContract.CoreClrCryptoDexReleasePath,
+            "crypto-dex");
+        files.Add(cryptoDex);
+        coreClrCryptoDexSha256 = cryptoDex.Hash;
+    }
+    if (includeLegacyRuntimeCryptoDex)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/lemonloader-coreclr-crypto.dex",
+            "legacy-crypto-dex"));
+    }
+    if (includeDiagnosticLibraries)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libmscordaccore.so",
+            "diagnostic-dac"));
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libmscordbi.so",
+            "diagnostic-dbi"));
+    }
+    if (includeLoaderDocumentation)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            "assets/LemonLoader/runtime/loader/Documentation/README.md",
+            "desktop documentation"));
+    }
+    if (includeStaleOpenSsl)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libSystem.Security.Cryptography.Native.OpenSsl.so",
+            "stale-openssl"));
+    }
+    foreach (var library in privateNativeLibraries ?? [])
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            $"assets/LemonLoader/runtime/dotnet/native/optional/{library}",
+            $"private-{library}"));
+    }
+
+    var runtimeEngineHash = files.Single(file => file.Path.EndsWith("/libcoreclr.so")).Hash;
+    var identity = new Dictionary<string, object>
+    {
+        ["formatVersion"] = 1,
+        ["runtimeVersion"] = runtimeVersion,
+        ["backend"] = runtimeBackend,
+        ["hostingModel"] = "coreclr-host-api",
+        ["engineFile"] = "libcoreclr.so",
+        ["engineSha256"] = runtimeEngineHash
+    };
+    if (includeAdditionalIdentityProperty)
+        identity["producer"] = "fixture";
+    var runtimeIdentity = WritePayload(
+        releaseRoot,
+        "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
+        JsonSerializer.Serialize(identity));
+    files.Add(runtimeIdentity);
+    if (includeAdditionalRuntimeMetadataFile)
+    {
+        files.Add(WritePayload(
+            releaseRoot,
+            "assets/LemonLoader/runtime/dotnet/runtime-extra.json",
+            "{\"producer\":\"fixture\"}"));
+    }
+    files.Add(WritePayload(
+        releaseRoot,
+        "assets/LemonLoader/payload.json",
+        JsonSerializer.Serialize(new
+        {
+            formatVersion = AndroidPayloadContract.FormatVersion,
+            loaderSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/loader"),
+            dotnetSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/dotnet"),
+            interopSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/interop"),
+            deploymentSha256 = ComputePayloadDirectoryHash(releaseRoot, "deployment"),
+            managedRuntimeBackend = runtimeBackend,
+            managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
+            coreClrCryptoDexSha256,
+            deploymentProfile = "development",
+            deploymentRevisionSha256 = ComputeDeploymentRevision([]),
+            deploymentFiles = Array.Empty<object>(),
+            privateNativeLibraries = privateNativeLibraries ?? []
+        })));
+    File.WriteAllText(
+        Path.Combine(releaseRoot, "lemonloader-release.json"),
+        JsonSerializer.Serialize(new
+        {
+            formatVersion = 2,
+            assetLayoutVersion = AndroidPayloadContract.FormatVersion,
+            configuration = "Release",
+            gameAssembliesIncluded = false,
+            managedRuntimeVersion = runtimeVersion,
+            managedRuntimeBackend = runtimeBackend,
+            managedRuntimeSourceRevision = runtimeRevision,
+            managedRuntimeEngineFile = "libcoreclr.so",
+            managedRuntimeEngineSha256 = runtimeEngineHash,
+            managedRuntimeThreadFilterAvailable = false,
+            files = files.Select(file => new
+            {
+                path = file.Path,
+                size = file.Size,
+                sha256 = file.Hash
+            })
+        }));
+    return releaseRoot;
 }
 
 static Task TestApkPayloadLayoutAsync()
@@ -371,9 +571,11 @@ static Task TestApkPayloadLayoutAsync()
         var apkPath = Path.Combine(root, "game.apk");
         CreateZip(apkPath, new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["lib/arm64-v8a/libmain.so"] = "game-main"
+            ["lib/arm64-v8a/libmain.so"] = "game-main",
+            ["classes.dex"] = "game-classes",
+            ["classes2.dex"] = "game-classes-2"
         });
-        var releaseRoot = CreateReleaseTree(root);
+        var releaseRoot = CreateReleaseTree(root, includeCoreClrCryptoDex: true);
         var interopRoot = CreateInteropTree(root);
         var deploymentRoot = Path.Combine(root, "deployment");
         Directory.CreateDirectory(Path.Combine(deploymentRoot, "Mods"));
@@ -416,6 +618,12 @@ static Task TestApkPayloadLayoutAsync()
         AssertTrue(
             archive.GetEntry("assets/LemonLoader/payload.json") is not null,
             "The consolidated payload manifest is missing.");
+        AssertEqual("crypto-dex", ReadZipEntry(archive, "classes3.dex"));
+        AssertTrue(
+            archive.GetEntry(
+                "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/" +
+                "lemonloader-coreclr-crypto.dex") is null,
+            "The Patcher duplicated the CoreCLR crypto helper dex in the runtime domain.");
         using var payloadDocument = JsonDocument.Parse(
             ReadZipEntry(archive, "assets/LemonLoader/payload.json"));
         AssertEqual(
@@ -431,9 +639,6 @@ static Task TestApkPayloadLayoutAsync()
             !payloadDocument.RootElement.TryGetProperty("runtimeSha256", out _) &&
             !payloadDocument.RootElement.TryGetProperty("runtimeFiles", out _),
             "The APK retained the obsolete aggregate runtime manifest.");
-        AssertTrue(
-            archive.Entries.All(entry => !AndroidPayloadContract.IsForbiddenReleasePath(entry.FullName)),
-            "Loader Documentation leaked into the APK.");
         AssertEqual(
             ComputePayloadHash(archive, "deployment"),
             payloadDocument.RootElement.GetProperty("deploymentSha256").GetString());
@@ -538,11 +743,16 @@ static Task TestApkPayloadLayoutAsync()
             documentationRelease,
             "assets/LemonLoader/runtime/loader/Documentation/README.md",
             "desktop documentation");
-        AssertThrows<InvalidDataException>(() => MergeApk(
+        MergeApk(
             documentationApkPath,
             documentationRelease,
             interopRoot,
-            null));
+            null);
+        using var documentationArchive = ZipFile.OpenRead(documentationApkPath);
+        AssertTrue(
+            documentationArchive.GetEntry(
+                "assets/LemonLoader/runtime/loader/Documentation/README.md") is not null,
+            "The Patcher rejected or removed an additive Release file.");
     }
     finally
     {
@@ -560,12 +770,13 @@ static Task TestDirectoryPayloadInjectionAsync()
         WritePayload(gameRoot, "lib/arm64-v8a/libmain.so", "game-main");
         WritePayload(gameRoot, "lib/arm64-v8a/libunity.so", "unity");
         WritePayload(gameRoot, "lib/arm64-v8a/libil2cpp.so", "il2cpp");
+        WritePayload(gameRoot, "classes.dex", "game-classes");
         WritePayload(
             gameRoot,
             "assets/bin/Data/Managed/Metadata/global-metadata.dat",
             "metadata");
         WritePayload(gameRoot, "res/keep.txt", "untouched");
-        var releaseRoot = CreateReleaseTree(root);
+        var releaseRoot = CreateReleaseTree(root, includeCoreClrCryptoDex: true);
         var interopRoot = CreateInteropTree(root);
         var deploymentRoot = Path.Combine(root, "directory-deployment");
         WritePayload(deploymentRoot, "Mods/ExampleMod.dll", "mod");
@@ -599,6 +810,9 @@ static Task TestDirectoryPayloadInjectionAsync()
                 "Mods",
                 "ExampleMod.dll")),
             "Deployment was not injected into the original directory.");
+        AssertEqual("crypto-dex", File.ReadAllText(
+            Path.Combine(gameRoot, "classes2.dex"),
+            Encoding.UTF8));
         AssertTrue(
             Directory.GetDirectories(gameRoot, ".lemonloader-patcher-*", SearchOption.TopDirectoryOnly).Length == 0,
             "Directory injection left a transaction directory behind.");
