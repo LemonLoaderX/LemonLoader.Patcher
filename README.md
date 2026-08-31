@@ -233,11 +233,10 @@ Exit codes are `0` for success, `1` for execution failure, `2` for invalid
 usage, and `130` for cancellation.
 
 Published Patcher packages always include the fixed Il2CppInterop generator built
-from fork revision `aecf17eeb5a6edd0b1aa4d1dc6460a83a0716aba`; they never
-restore the older NuGet tool. The generation manifest records its source, CLI
-hash, and deterministic dependency content hash. The bundled `net6.0` generator
-uses .NET major roll-forward, so the runtime already required by Patcher is
-sufficient.
+from the revision pinned in `Directory.Build.props`; they never restore the older
+NuGet tool. The generation manifest records its source, CLI hash, and deterministic
+dependency content hash. The bundled `net6.0` generator uses .NET major roll-forward,
+so the runtime already required by Patcher is sufficient.
 
 The Patcher does not include a LemonLoader Release archive. Without `--release`,
 it downloads and caches

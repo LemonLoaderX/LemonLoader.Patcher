@@ -16,7 +16,13 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $releaseRoot = Join-Path $repositoryRoot "Output\Releases"
 $publishTempRoot = Join-Path $repositoryRoot "Output\PublishTemp"
-$expectedIl2CppInteropRevision = "fc5c450eb1437def73bbfc17950581cee30fa765"
+$buildPropertiesPath = Join-Path $repositoryRoot "Directory.Build.props"
+[xml]$buildProperties = Get-Content -LiteralPath $buildPropertiesPath -Raw
+$expectedIl2CppInteropRevision = [string](
+    $buildProperties.Project.PropertyGroup.BundledIl2CppInteropRevision)
+if ($expectedIl2CppInteropRevision -notmatch '^[0-9a-f]{40}$') {
+    throw "Directory.Build.props does not define a valid bundled Il2CppInterop revision."
+}
 if ([string]::IsNullOrWhiteSpace($Il2CppInteropSourceRoot)) {
     $Il2CppInteropSourceRoot = Join-Path $repositoryRoot "..\dependencies\Il2CppInterop"
 }

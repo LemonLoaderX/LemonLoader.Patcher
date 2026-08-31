@@ -97,9 +97,10 @@ static Task TestInteropGeneratorOverrideAsync()
         AssertThrows<InvalidDataException>(() =>
             InteropGeneratorTool.FromBundledFork(toolPath));
         File.WriteAllText(provenancePath, provenance);
-        AssertEqual(
-            "aecf17eeb5a6edd0b1aa4d1dc6460a83a0716aba",
-            BundledInteropGeneratorTool.Revision);
+        AssertTrue(
+            BundledInteropGeneratorTool.Revision.Length == 40 &&
+            BundledInteropGeneratorTool.Revision.All(Uri.IsHexDigit),
+            "The bundled generator revision is not a full Git commit ID.");
         AssertEqual(
             "https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip",
             ReleaseResolver.LatestUrl);

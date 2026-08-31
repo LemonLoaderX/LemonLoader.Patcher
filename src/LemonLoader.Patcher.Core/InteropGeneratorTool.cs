@@ -112,7 +112,11 @@ internal sealed record InteropGeneratorTool(
 
 internal static class BundledInteropGeneratorTool
 {
-    public const string Revision = "aecf17eeb5a6edd0b1aa4d1dc6460a83a0716aba";
+    public static readonly string Revision = typeof(BundledInteropGeneratorTool).Assembly
+        .GetCustomAttributes<AssemblyMetadataAttribute>()
+        .Single(attribute => attribute.Key == "BundledIl2CppInteropRevision")
+        .Value ?? throw new InvalidOperationException(
+            "The bundled Il2CppInterop revision metadata has no value.");
     public const string ProvenanceFileName = "lemonloader-il2cppinterop.json";
     private const string ToolDirectory = "Il2CppInterop";
     private const string ToolFileName = "Il2CppInterop.CLI.dll";
