@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
@@ -126,10 +127,43 @@ internal static class PayloadAssembler
             .ToHashSet(StringComparer.Ordinal);
         foreach (var dexPath in Directory.GetFiles(gameRoot, "classes*.dex", SearchOption.TopDirectoryOnly))
             entryNames.Add(Path.GetFileName(dexPath));
+        AddDecodedDexEntries(gameRoot, entryNames);
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Create);
         foreach (var entryName in entryNames.OrderBy(name => name, StringComparer.Ordinal))
             archive.CreateEntry(entryName, CompressionLevel.NoCompression);
         return entryNames;
+    }
+
+    private static void AddDecodedDexEntries(string gameRoot, ISet<string> entryNames)
+    {
+        const string secondaryPrefix = "smali_classes";
+        foreach (var directory in Directory.GetDirectories(
+                     gameRoot,
+                     "*",
+                     SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(directory);
+            if (string.Equals(name, "smali", StringComparison.Ordinal))
+            {
+                entryNames.Add("classes.dex");
+                continue;
+            }
+            if (!name.StartsWith(secondaryPrefix, StringComparison.Ordinal))
+                continue;
+
+            var suffix = name[secondaryPrefix.Length..];
+            if (suffix.Length == 0 || suffix[0] == '0' ||
+                !int.TryParse(
+                    suffix,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var index) ||
+                index < 2)
+            {
+                continue;
+            }
+            entryNames.Add($"classes{index}.dex");
+        }
     }
 
     private static void ExtractDirectoryOverlay(

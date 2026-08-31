@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <BundledIl2CppInteropRevision>fc5c450eb1437def73bbfc17950581cee30fa765</BundledIl2CppInteropRevision>
   </PropertyGroup>
   <ItemGroup>

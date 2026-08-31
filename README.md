@@ -103,6 +103,10 @@ CLI\LemonLoader.Patcher.CLI.exe patch UnpackedGame `
     --release LemonLoader-Android-arm64.zip
 ```
 
+Directory mode accepts raw `classes*.dex` files and apktool-decoded
+`smali`/`smali_classesN` source directories. CoreCLR adds its helper as the next
+unused DEX index without materializing synthetic source DEX files.
+
 Patch with Mods and persistent UserData using the `production` profile:
 
 ```text

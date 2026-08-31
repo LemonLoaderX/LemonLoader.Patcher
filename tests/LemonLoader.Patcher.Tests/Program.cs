@@ -834,6 +834,48 @@ static Task TestDirectoryPayloadInjectionAsync()
             interopRoot,
             null));
 
+        var decodedGameRoot = Path.Combine(root, "apktool-decoded-game");
+        WritePayload(decodedGameRoot, "lib/arm64-v8a/libmain.so", "game-main");
+        WritePayload(decodedGameRoot, "lib/arm64-v8a/libunity.so", "unity");
+        WritePayload(decodedGameRoot, "lib/arm64-v8a/libil2cpp.so", "il2cpp");
+        WritePayload(decodedGameRoot, "smali/Main.smali", "primary-smali");
+        WritePayload(decodedGameRoot, "smali_classes2/Secondary.smali", "secondary-smali");
+
+        InjectDirectory(
+            decodedGameRoot,
+            releaseRoot,
+            interopRoot,
+            null);
+
+        AssertEqual("crypto-dex", File.ReadAllText(
+            Path.Combine(decodedGameRoot, "classes3.dex"),
+            Encoding.UTF8));
+        AssertTrue(
+            !File.Exists(Path.Combine(decodedGameRoot, "classes.dex")) &&
+            !File.Exists(Path.Combine(decodedGameRoot, "classes2.dex")),
+            "Directory injection materialized synthetic source DEX files.");
+        AssertTrue(
+            File.Exists(Path.Combine(decodedGameRoot, "smali", "Main.smali")) &&
+            File.Exists(Path.Combine(
+                decodedGameRoot,
+                "smali_classes2",
+                "Secondary.smali")),
+            "Directory injection modified apktool smali source directories.");
+
+        var missingPrimaryDexRoot = Path.Combine(root, "missing-primary-dex");
+        WritePayload(missingPrimaryDexRoot, "lib/arm64-v8a/libmain.so", "game-main");
+        WritePayload(missingPrimaryDexRoot, "lib/arm64-v8a/libunity.so", "unity");
+        WritePayload(missingPrimaryDexRoot, "lib/arm64-v8a/libil2cpp.so", "il2cpp");
+        WritePayload(
+            missingPrimaryDexRoot,
+            "smali_classes2/Secondary.smali",
+            "secondary-smali");
+        AssertThrows<InvalidDataException>(() => InjectDirectory(
+            missingPrimaryDexRoot,
+            releaseRoot,
+            interopRoot,
+            null));
+
         var collisionRoot = Path.Combine(root, "native-collision");
         WritePayload(collisionRoot, "lib/arm64-v8a/libmain.so", "original-main");
         WritePayload(collisionRoot, "lib/arm64-v8a/libunity.so", "unity");
