@@ -16,7 +16,7 @@ $ErrorActionPreference = "Stop"
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $releaseRoot = Join-Path $repositoryRoot "Output\Releases"
 $publishTempRoot = Join-Path $repositoryRoot "Output\PublishTemp"
-$expectedIl2CppInteropRevision = "aecf17eeb5a6edd0b1aa4d1dc6460a83a0716aba"
+$expectedIl2CppInteropRevision = "fc5c450eb1437def73bbfc17950581cee30fa765"
 if ([string]::IsNullOrWhiteSpace($Il2CppInteropSourceRoot)) {
     $Il2CppInteropSourceRoot = Join-Path $repositoryRoot "..\dependencies\Il2CppInterop"
 }

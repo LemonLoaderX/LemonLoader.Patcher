@@ -119,12 +119,11 @@ function Get-DeploymentRevision {
     param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Files)
 
     [string[]]$lines = @(
-        $Files |
-            Sort-Object { [string]$_.path } -CaseSensitive |
-            ForEach-Object {
-                "$($_.path)|$($_.size)|$($_.sha256)|$($_.policy)"
-            }
+        $Files | ForEach-Object {
+            "$($_.path)|$($_.size)|$($_.sha256)|$($_.policy)"
+        }
     )
+    [Array]::Sort($lines, [StringComparer]::Ordinal)
     $bytes = [Text.Encoding]::UTF8.GetBytes(
         ((@("deployment-revision=1") + $lines) -join "`n"))
     return [Convert]::ToHexString(
