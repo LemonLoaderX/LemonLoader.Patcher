@@ -18,6 +18,8 @@ The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
 contract installed with the current version.
 
+Release packages are framework-dependent and require the .NET 10 runtime.
+
 ### Patch command
 
 ```text

@@ -1,0 +1,136 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.runtime }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            runtime: win-x64
+            asset: LemonLoader.Patcher-win-x64.zip
+          - os: ubuntu-latest
+            runtime: linux-x64
+            asset: LemonLoader.Patcher-linux-x64.tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read release metadata
+        id: metadata
+        shell: pwsh
+        run: |
+          [xml]$properties = Get-Content Directory.Build.props -Raw
+          $version = "v$($properties.Project.PropertyGroup.Version)"
+          $interopRevision = [string]$properties.Project.PropertyGroup.BundledIl2CppInteropRevision
+          if ($interopRevision -notmatch '^[0-9a-f]{40}$') {
+            throw "BundledIl2CppInteropRevision is invalid."
+          }
+          if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -cne $version) {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match '$version'."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "interop_revision=$interopRevision" >> $env:GITHUB_OUTPUT
+
+      - name: Check out maintained Il2CppInterop
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP "Il2CppInterop"
+          git clone --filter=blob:none --no-checkout `
+            https://github.com/LemonLoaderX/Il2CppInterop.git $source
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cloning Il2CppInterop failed."
+          }
+          git -C $source checkout --detach "${{ steps.metadata.outputs.interop_revision }}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Checking out the pinned Il2CppInterop revision failed."
+          }
+
+      - name: Run regression tests
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/test.ps1 -Configuration Release
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -File scripts/publish.ps1 `
+            -Runtime "${{ matrix.runtime }}" `
+            -Il2CppInteropSourceRoot "$env:RUNNER_TEMP/Il2CppInterop"
+          pwsh -NoProfile -File scripts/package-release.ps1 `
+            -Version "${{ steps.metadata.outputs.version }}" `
+            -Runtime "${{ matrix.runtime }}"
+
+      - name: Verify published CLI
+        shell: pwsh
+        run: |
+          $suffix = if ($IsWindows) { ".exe" } else { "" }
+          $executable = "Output/Releases/${{ matrix.runtime }}/CLI/LemonLoader.Patcher.CLI$suffix"
+          & $executable --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "The published CLI did not start successfully."
+          }
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Patcher-${{ matrix.runtime }}
+          path: Output/Packages/${{ steps.metadata.outputs.version }}/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: Patcher-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Record checksums
+        working-directory: release-assets
+        run: sha256sum LemonLoader.Patcher-* > SHA256SUMS.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --title "LemonLoader Patcher $TAG" \
+              --notes "Cross-platform CLI and GUI release for patching Android ARM64 IL2CPP applications. The .NET 10 runtime is required."
+          fi
