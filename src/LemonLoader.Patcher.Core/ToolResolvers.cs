@@ -102,7 +102,7 @@ internal static class ReleaseResolver
 {
     private const string ReleaseFileName = "LemonLoader-Android-arm64.zip";
     internal const string LatestUrl =
-        "https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip";
+        "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip";
 
     public static async Task<string> ResolveLatestAsync(
         string root,

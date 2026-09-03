@@ -102,7 +102,7 @@ static Task TestInteropGeneratorOverrideAsync()
             BundledInteropGeneratorTool.Revision.All(Uri.IsHexDigit),
             "The bundled generator revision is not a full Git commit ID.");
         AssertEqual(
-            "https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip",
+            "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip",
             ReleaseResolver.LatestUrl);
         File.WriteAllText(generatorPath, "generator-v2");
         var changedTool = InteropGeneratorTool.FromOverride(toolPath);
@@ -357,6 +357,9 @@ static Task TestReleaseValidationAsync()
         ReleaseValidator.Validate(root);
 
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeRuntimeThreadFilterProperty: false));
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
             CreateCoreClrReleaseFixture(testRoot, includeAndroidCrypto: false)));
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
@@ -427,7 +430,8 @@ static string CreateCoreClrReleaseFixture(
     bool includeDiagnosticLibraries = false,
     bool includeLoaderDocumentation = false,
     bool includeAdditionalRuntimeMetadataFile = false,
-    bool includeAdditionalIdentityProperty = false)
+    bool includeAdditionalIdentityProperty = false,
+    bool includeRuntimeThreadFilterProperty = true)
 {
     const string runtimeVersion = "10.0.10";
     const string runtimeBackend = "coreclr";
@@ -540,27 +544,29 @@ static string CreateCoreClrReleaseFixture(
             deploymentFiles = Array.Empty<object>(),
             privateNativeLibraries = privateNativeLibraries ?? []
         })));
+    var releaseManifest = new Dictionary<string, object>
+    {
+        ["formatVersion"] = 2,
+        ["assetLayoutVersion"] = AndroidPayloadContract.FormatVersion,
+        ["configuration"] = "Release",
+        ["gameAssembliesIncluded"] = false,
+        ["managedRuntimeVersion"] = runtimeVersion,
+        ["managedRuntimeBackend"] = runtimeBackend,
+        ["managedRuntimeSourceRevision"] = runtimeRevision,
+        ["managedRuntimeEngineFile"] = "libcoreclr.so",
+        ["managedRuntimeEngineSha256"] = runtimeEngineHash,
+        ["files"] = files.Select(file => new
+        {
+            path = file.Path,
+            size = file.Size,
+            sha256 = file.Hash
+        })
+    };
+    if (includeRuntimeThreadFilterProperty)
+        releaseManifest["managedRuntimeThreadFilterAvailable"] = false;
     File.WriteAllText(
         Path.Combine(releaseRoot, "lemonloader-release.json"),
-        JsonSerializer.Serialize(new
-        {
-            formatVersion = 2,
-            assetLayoutVersion = AndroidPayloadContract.FormatVersion,
-            configuration = "Release",
-            gameAssembliesIncluded = false,
-            managedRuntimeVersion = runtimeVersion,
-            managedRuntimeBackend = runtimeBackend,
-            managedRuntimeSourceRevision = runtimeRevision,
-            managedRuntimeEngineFile = "libcoreclr.so",
-            managedRuntimeEngineSha256 = runtimeEngineHash,
-            managedRuntimeThreadFilterAvailable = false,
-            files = files.Select(file => new
-            {
-                path = file.Path,
-                size = file.Size,
-                sha256 = file.Hash
-            })
-        }));
+        JsonSerializer.Serialize(releaseManifest));
     return releaseRoot;
 }
 

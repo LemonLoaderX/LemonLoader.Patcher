@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <Version>1.0.4</Version>
-    <BundledIl2CppInteropRevision>cc3623e2cf653689bc4a80f06d6a5c074c1c47e8</BundledIl2CppInteropRevision>
+    <BundledIl2CppInteropRevision>eb22f9e84a72d36b2d158ba6186965934092e662</BundledIl2CppInteropRevision>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="BundledIl2CppInteropRevision"

@@ -88,8 +88,14 @@ internal static class ReleaseValidator
         var runtimeRevision = releaseManifest.GetProperty("managedRuntimeSourceRevision").GetString();
         var runtimeEngineFile = releaseManifest.GetProperty("managedRuntimeEngineFile").GetString();
         var runtimeEngineHash = releaseManifest.GetProperty("managedRuntimeEngineSha256").GetString();
-        var runtimeThreadFilterAvailable =
-            releaseManifest.GetProperty("managedRuntimeThreadFilterAvailable").GetBoolean();
+        var runtimeThreadFilterAvailable = false;
+        if (releaseManifest.TryGetProperty("managedRuntimeThreadFilterAvailable", out var threadFilter))
+        {
+            if (threadFilter.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                throw new InvalidDataException(
+                    "The managed runtime thread-filter capability must be a boolean.");
+            runtimeThreadFilterAvailable = threadFilter.GetBoolean();
+        }
         if (string.IsNullOrWhiteSpace(runtimeVersion) ||
             configuration is not ("Debug" or "Release") ||
             runtimeRevision is null || runtimeRevision.Length != 40 ||
