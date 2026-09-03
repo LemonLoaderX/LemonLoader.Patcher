@@ -17,6 +17,7 @@ $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $releaseRoot = Join-Path $repositoryRoot "Output\Releases"
 $publishTempRoot = Join-Path $repositoryRoot "Output\PublishTemp"
 $buildPropertiesPath = Join-Path $repositoryRoot "Directory.Build.props"
+[void][IO.Directory]::CreateDirectory($releaseRoot)
 [xml]$buildProperties = Get-Content -LiteralPath $buildPropertiesPath -Raw
 $expectedIl2CppInteropRevision = [string](
     $buildProperties.Project.PropertyGroup.BundledIl2CppInteropRevision)
