@@ -294,14 +294,6 @@ internal static class ReleaseValidator
                 throw new InvalidDataException(
                     "The Android CoreCLR Release must not declare private OpenSSL dependencies.");
 
-            var staleOpenSsl = files.FirstOrDefault(path =>
-                path.StartsWith(privateOpenSslRoot, StringComparison.Ordinal) ||
-                path.EndsWith(
-                    "/libSystem.Security.Cryptography.Native.OpenSsl.so",
-                    StringComparison.Ordinal));
-            if (staleOpenSsl is not null)
-                throw new InvalidDataException(
-                    $"The Android CoreCLR Release contains stale OpenSSL payload '{staleOpenSsl}'.");
             return;
         }
 

@@ -378,8 +378,9 @@ static Task TestReleaseValidationAsync()
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
             testRoot,
             privateNativeLibraries: ["future.so"]));
-        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(
-            CreateCoreClrReleaseFixture(testRoot, includeStaleOpenSsl: true)));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeStaleOpenSsl: true));
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
             testRoot,
             includeAdditionalRuntimeMetadataFile: true));

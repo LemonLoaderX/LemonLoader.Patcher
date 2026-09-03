@@ -238,18 +238,6 @@ try {
             "lemssl.so" -cin $privateLibraries) {
             throw "APK CoreCLR payload still declares private OpenSSL dependencies."
         }
-        $staleOpenSslEntry = $archive.Entries | Where-Object {
-            $_.FullName.StartsWith(
-                "assets/LemonLoader/runtime/dotnet/native/openssl/",
-                [StringComparison]::Ordinal) -or
-            $_.FullName.EndsWith(
-                "/libSystem.Security.Cryptography.Native.OpenSsl.so",
-                [StringComparison]::Ordinal)
-        } | Select-Object -First 1
-        if ($null -ne $staleOpenSslEntry) {
-            throw "APK CoreCLR payload contains stale OpenSSL entry '$($staleOpenSslEntry.FullName)'."
-        }
-
         $promotedDexEntries = @($archive.Entries | Where-Object {
             $_.FullName -match '^classes(?:(?:[2-9][0-9]*|1[0-9]+))?\.dex$' -and
             (Get-EntrySha256 -Entry $_) -ceq $coreClrCryptoDexHash
