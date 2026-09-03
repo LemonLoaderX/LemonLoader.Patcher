@@ -203,6 +203,13 @@ try {
             New-Item -ItemType Directory -Force -Path $bundledToolDirectory | Out-Null
             Get-ChildItem -LiteralPath $toolOutput -Force |
                 Copy-Item -Destination $bundledToolDirectory -Recurse -Force
+            foreach ($legalFile in @("LICENSE", "NOTICE")) {
+                $legalPath = Join-Path $repositoryRoot $legalFile
+                if (-not (Test-Path -LiteralPath $legalPath -PathType Leaf)) {
+                    throw "Patcher legal file '$legalFile' is missing."
+                }
+                Copy-Item -LiteralPath $legalPath -Destination $runtimeStaging -Force
+            }
 
             $cliExecutable = Join-Path $runtimeStaging `
                 "CLI\LemonLoader.Patcher.CLI$(if ($runtimeIdentifier -eq 'win-x64') { '.exe' })"

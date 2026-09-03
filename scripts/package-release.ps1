@@ -36,6 +36,8 @@ function Assert-ChildPath {
 function Get-RequiredEntries([string]$RuntimeIdentifier) {
     $suffix = if ($RuntimeIdentifier -eq "win-x64") { ".exe" } else { "" }
     return @(
+        "LICENSE",
+        "NOTICE",
         "CLI/LemonLoader.Patcher.CLI$suffix",
         "GUI/LemonLoader.Patcher.GUI$suffix",
         "Tools/Il2CppInterop/Il2CppInterop.CLI.dll",

@@ -156,10 +156,10 @@ Tool paths can instead be supplied explicitly:
 CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --output game-lemonloader.apk `
     --align `
-    --zipalign D:\Android\build-tools\zipalign.exe `
+    --zipalign <android-sdk>\build-tools\<version>\zipalign.exe `
     --keystore signing.jks `
     --key-alias release `
-    --apksigner D:\Android\build-tools\apksigner.bat
+    --apksigner <android-sdk>\build-tools\<version>\apksigner.bat
 ```
 
 ### Deployment behavior
@@ -244,7 +244,7 @@ so the runtime already required by Patcher is sufficient.
 
 The Patcher does not include a LemonLoader Release archive. Without `--release`,
 it downloads and caches
-`https://github.com/anosu/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip`.
+`https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip`.
 Use `--release <path>` for an explicit local or offline build.
 
 ## GUI
@@ -287,7 +287,7 @@ pwsh -NoProfile -File scripts/test.ps1
 pwsh -NoProfile -File scripts/publish.ps1 `
   -Runtime win-x64 `
   -Il2CppInteropSourceRoot ..\dependencies\Il2CppInterop
-pwsh -NoProfile -File scripts/package-release.ps1 -Version v1.0.0
+pwsh -NoProfile -File scripts/package-release.ps1 -Version v1.0.4
 ```
 
 Stable outputs use the same acronym casing as the products:
@@ -299,9 +299,9 @@ Output/Releases/win-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
 Output/Releases/linux-x64/CLI/LemonLoader.Patcher.CLI
 Output/Releases/linux-x64/GUI/LemonLoader.Patcher.GUI
 Output/Releases/linux-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
-Output/Packages/v1.0.0/LemonLoader.Patcher-win-x64.zip
-Output/Packages/v1.0.0/LemonLoader.Patcher-linux-x64.tar.gz
-Output/Packages/v1.0.0/SHA256SUMS.txt
+Output/Packages/v1.0.4/LemonLoader.Patcher-win-x64.zip
+Output/Packages/v1.0.4/LemonLoader.Patcher-linux-x64.tar.gz
+Output/Packages/v1.0.4/SHA256SUMS.txt
 ```
 
 Publishing uses a fresh staging directory and atomically replaces the runtime
@@ -314,7 +314,7 @@ exists only for local output-layout validation and its output must not be
 uploaded.
 
 Binary releases are published at
-`https://github.com/anosu/LemonLoader.Patcher/releases`.
+`https://github.com/LemonLoaderX/LemonLoader.Patcher/releases`.
 
 The current Release contract is asset layout v8 with
 `assets/LemonLoader/payload.json`. Runtime loader, dotnet, Interop, and packaged
@@ -327,3 +327,10 @@ JSON metadata and files instead of maintaining content blacklists. Android
 staging, rather than Patcher, decides whether desktop-only material is published.
 Native entry replacement is limited to `libmain.so`;
 private .NET native dependencies remain isolated from game-owned libraries.
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for repository and validation rules and
+[SECURITY.md](SECURITY.md) for private vulnerability reporting. LemonLoader
+Patcher is licensed under Apache-2.0; bundled tools retain their own license files
+and source provenance.
