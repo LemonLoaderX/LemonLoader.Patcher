@@ -1,5 +1,4 @@
 <Solution>
-  <Project Path="src/LemonLoader.ManagedCompat/LemonLoader.ManagedCompat.csproj" />
   <Project Path="src/LemonLoader.Patcher.Core/LemonLoader.Patcher.Core.csproj" />
   <Project Path="src/LemonLoader.Patcher.CLI/LemonLoader.Patcher.CLI.csproj" />
   <Project Path="src/LemonLoader.Patcher.GUI/LemonLoader.Patcher.GUI.csproj" />
