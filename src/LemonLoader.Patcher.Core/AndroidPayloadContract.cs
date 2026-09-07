@@ -99,6 +99,18 @@ internal static class AndroidPayloadContract
         path.StartsWith($"{DotnetRoot}/", StringComparison.Ordinal) ||
         path.StartsWith($"{InteropRoot}/", StringComparison.Ordinal);
 
+    // Only use digests computed from actual file bytes in this validation run.
+    internal static string ComputeTreeHash(
+        IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles, string scope)
+    {
+        var prefix = $"{PayloadRoot}/{scope}/";
+        var lines = new List<string> { $"layout-version={FormatVersion}", $"scope={scope}" };
+        foreach (var file in verifiedFiles.Where(file => file.Key.StartsWith(prefix, StringComparison.Ordinal))
+                     .OrderBy(file => file.Key, StringComparer.Ordinal))
+            lines.Add($"{file.Key[(PayloadRoot.Length + 1)..]}|{file.Value.Size}|{file.Value.Hash}");
+        return HashLines(lines);
+    }
+
     private static string HashLines(IEnumerable<string> lines) =>
         Convert.ToHexString(SHA256.HashData(
                 Encoding.UTF8.GetBytes(string.Join('\n', lines))))

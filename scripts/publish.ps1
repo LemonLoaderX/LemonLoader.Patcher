@@ -43,20 +43,7 @@ $projects = @(
     }
 )
 
-function Assert-ChildPath {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Parent
-    )
-
-    $fullPath = [System.IO.Path]::GetFullPath($Path)
-    $fullParent = [System.IO.Path]::GetFullPath($Parent).TrimEnd(
-        [System.IO.Path]::DirectorySeparatorChar,
-        [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $fullPath.StartsWith($fullParent, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to modify '$fullPath' because it is outside '$fullParent'."
-    }
-}
+. (Join-Path $PSScriptRoot 'common/Paths.ps1')
 
 function Assert-NoRunningPublishedProcess {
     param([Parameter(Mandatory)][string]$Path)

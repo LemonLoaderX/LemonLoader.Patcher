@@ -30,14 +30,15 @@ public sealed class ApkPatchPipeline
         Directory.CreateDirectory(workRoot);
         try
         {
-            var releaseRoot = await ResolveReleaseAsync(workRoot, cancellationToken);
+            var release = await ResolveReleaseAsync(workRoot, cancellationToken);
             var generatedInterop = await new GameInteropGenerator(request, progress)
                 .GenerateAsync(workRoot, cancellationToken);
             var payload = new PayloadSource(
-                releaseRoot,
+                release.ReleaseRoot,
                 generatedInterop.DirectoryPath,
                 request.DeploymentPath,
-                request.DeploymentPolicies);
+                request.DeploymentPolicies,
+                release.VerifiedFiles);
 
             if (request.InputKind == PatchInputKind.Directory)
             {
@@ -68,7 +69,7 @@ public sealed class ApkPatchPipeline
         }
     }
 
-    private async Task<string> ResolveReleaseAsync(
+    private async Task<ReleaseValidationResult> ResolveReleaseAsync(
         string workRoot,
         CancellationToken cancellationToken)
     {
@@ -85,14 +86,14 @@ public sealed class ApkPatchPipeline
         }
         var releaseRoot = Path.Combine(workRoot, "release");
         ZipFile.ExtractToDirectory(releaseArchive, releaseRoot);
-        ReleaseValidator.Validate(releaseRoot);
+        var validation = ReleaseValidator.Validate(releaseRoot);
         if (request.RuntimeVariant is not null || request.ReleasePath is null)
         {
             using var manifest = System.Text.Json.JsonDocument.Parse(
                 File.ReadAllText(Path.Combine(releaseRoot, "lemonloader-release.json")));
             RuntimeVariants.ValidateManifest(manifest.RootElement, RuntimeVariants.Normalize(request.RuntimeVariant));
         }
-        return releaseRoot;
+        return validation;
     }
 
     private void TryDeleteWorkRoot(string workRoot)

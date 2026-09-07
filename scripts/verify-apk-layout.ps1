@@ -229,7 +229,25 @@ try {
     $androidCryptoEntry = $archive.GetEntry(
         "$sharedRuntimeRoot/libSystem.Security.Cryptography.Native.Android.so")
     $coreClrCryptoDexHash = [string]$payload.coreClrCryptoDexSha256
-    if ($payload.managedRuntimeBackend -ceq "coreclr") {
+    if ($payload.runtimeRid -ceq 'linux-bionic-arm64' -or
+        $payload.experimentalRuntimeRid -ceq 'linux-bionic-arm64') {
+        if ($payload.managedRuntimeBackend -cne 'coreclr' -or
+            $null -ne $androidCryptoEntry -or
+            -not [string]::IsNullOrEmpty($coreClrCryptoDexHash)) {
+            throw 'APK Bionic payload contains incompatible runtime or JNI crypto metadata.'
+        }
+        if ($payload.runtimeRid -and
+            ($runtimeIdentity.runtimeRid -cne $payload.runtimeRid -or
+             $runtimeIdentity.cryptoBackend -cne 'openssl')) {
+            throw 'APK Bionic runtime identity does not match payload.json.'
+        }
+        foreach ($library in @('libSystem.Security.Cryptography.Native.OpenSsl.so', 'libssl.so', 'libcrypto.so')) {
+            if ($null -eq $archive.GetEntry("$sharedRuntimeRoot/$library")) {
+                throw "APK Bionic payload is missing '$library'."
+            }
+        }
+    }
+    elseif ($payload.managedRuntimeBackend -ceq "coreclr") {
         if ($null -eq $androidCryptoEntry -or
             $coreClrCryptoDexHash -notmatch '^[0-9a-f]{64}$') {
             throw "APK CoreCLR payload is missing its Android crypto library or helper dex hash."

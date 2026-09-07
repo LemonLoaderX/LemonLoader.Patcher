@@ -8,7 +8,8 @@ internal sealed record PayloadSource(
     string ReleaseRoot,
     string InteropRoot,
     string? DeploymentPath,
-    DeploymentPolicyOptions DeploymentPolicies);
+    DeploymentPolicyOptions DeploymentPolicies,
+    IReadOnlyDictionary<string, (long Size, string Hash)> VerifiedReleaseFiles);
 
 internal static class PayloadAssembler
 {
@@ -29,7 +30,7 @@ internal static class PayloadAssembler
         ValidatePrivateNativeLibraries(archive, payload.PrivateNativeLibraries);
         RejectExistingLoaderPayload(archive);
         AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets");
-        AddCoreClrCryptoDex(archive, source.ReleaseRoot, payload);
+        var coreClrCryptoDexHash = AddCoreClrCryptoDex(archive, source, payload);
         ValidateRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"));
         foreach (var dll in Directory.GetFiles(source.InteropRoot, "*.dll"))
@@ -50,7 +51,11 @@ internal static class PayloadAssembler
         if (source.DeploymentPath is not null)
             AddDeploymentRoot(archive, source.DeploymentPath);
         ValidateDeploymentEntries(archive);
-        RefreshPayloadDescriptor(archive, payload, source.DeploymentPolicies);
+        RefreshPayloadDescriptor(
+            archive,
+            payload,
+            source.DeploymentPolicies,
+            coreClrCryptoDexHash);
         ValidateUniqueEntries(archive);
     }
 
@@ -197,7 +202,8 @@ internal static class PayloadAssembler
     private static void RefreshPayloadDescriptor(
         ZipArchive archive,
         PayloadDescriptor descriptor,
-        DeploymentPolicyOptions deploymentPolicies)
+        DeploymentPolicyOptions deploymentPolicies,
+        string? coreClrCryptoDexHash)
     {
         var deploymentFiles = BuildDeploymentFileDescriptors(archive, deploymentPolicies);
         deploymentPolicies.ValidateRuleCoverage(deploymentFiles.Select(file => file.Path));
@@ -209,7 +215,8 @@ internal static class PayloadAssembler
             DeploymentSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "deployment"),
             DeploymentProfile = deploymentPolicies.Profile.ToString().ToLowerInvariant(),
             DeploymentRevisionSha256 = ComputeDeploymentRevision(deploymentFiles),
-            DeploymentFiles = deploymentFiles
+            DeploymentFiles = deploymentFiles,
+            CoreClrCryptoDexSha256 = coreClrCryptoDexHash
         };
         archive.GetEntry(PayloadEntry)?.Delete();
         var manifestEntry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
@@ -277,23 +284,23 @@ internal static class PayloadAssembler
         if (!IsSha256(descriptor.ManagedRuntimeIdentitySha256))
             throw new InvalidDataException(
                 "Android payload manifest contains an invalid managed runtime identity hash.");
+        if (descriptor.CoreClrCryptoDexSha256 is not null &&
+            !IsSha256(descriptor.CoreClrCryptoDexSha256))
+        {
+            throw new InvalidDataException(
+                "Android payload manifest contains an invalid crypto helper dex hash.");
+        }
         if (descriptor.RuntimeRid is not null && descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
             throw new InvalidDataException("Unsupported runtime RID.");
         if (descriptor.RuntimeRid == "linux-bionic-arm64" &&
-            (runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.CoreClrCryptoDexSha256 is not null))
+            (runtimeBackend != ManagedRuntimeBackend.CoreClr ||
+             descriptor.CoreClrCryptoDexSha256 is not null))
             throw new InvalidDataException("Invalid Bionic cryptography metadata.");
         if (descriptor.ExperimentalRuntimeRid is not null &&
             (descriptor.ExperimentalRuntimeRid != "linux-bionic-arm64" ||
-             runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.CoreClrCryptoDexSha256 is not null))
+             runtimeBackend != ManagedRuntimeBackend.CoreClr ||
+             descriptor.CoreClrCryptoDexSha256 is not null))
             throw new InvalidDataException("Invalid experimental runtime payload metadata.");
-        if (runtimeBackend == ManagedRuntimeBackend.CoreClr && descriptor.ExperimentalRuntimeRid is null &&
-            descriptor.RuntimeRid != "linux-bionic-arm64" &&
-            (descriptor.CoreClrCryptoDexSha256 is null ||
-             !IsSha256(descriptor.CoreClrCryptoDexSha256)))
-        {
-            throw new InvalidDataException(
-                "Android CoreCLR payload manifest contains no valid crypto helper dex hash.");
-        }
         if (runtimeBackend == ManagedRuntimeBackend.MonoVmSgen &&
             descriptor.CoreClrCryptoDexSha256 is not null)
         {
@@ -449,29 +456,37 @@ internal static class PayloadAssembler
         }
     }
 
-    private static void AddCoreClrCryptoDex(
+    private static string? AddCoreClrCryptoDex(
         ZipArchive archive,
-        string releaseRoot,
+        PayloadSource source,
         PayloadDescriptor descriptor)
     {
-        if (descriptor.CoreClrCryptoDexSha256 is null)
-            return;
+        var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
+            descriptor.ManagedRuntimeBackend);
+        var isBionic = descriptor.RuntimeRid == "linux-bionic-arm64" ||
+            descriptor.ExperimentalRuntimeRid == "linux-bionic-arm64";
+        if (runtimeBackend != ManagedRuntimeBackend.CoreClr || isBionic)
+            return null;
 
         var cryptoDex = GamePackageLayout.FilePath(
-            releaseRoot,
+            source.ReleaseRoot,
             AndroidPayloadContract.CoreClrCryptoDexReleasePath);
         RequireFile(cryptoDex, "Android CoreCLR crypto helper dex");
-        using (var input = File.OpenRead(cryptoDex))
+        if (!source.VerifiedReleaseFiles.TryGetValue(
+                AndroidPayloadContract.CoreClrCryptoDexReleasePath,
+                out var verifiedCryptoDex))
         {
-            var actualHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            if (!string.Equals(
-                    actualHash,
-                    descriptor.CoreClrCryptoDexSha256,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException(
-                    "The Android CoreCLR crypto helper dex does not match payload.json.");
-            }
+            throw new InvalidDataException(
+                "The validated Android CoreCLR Release has no crypto helper dex digest.");
+        }
+        if (descriptor.CoreClrCryptoDexSha256 is not null &&
+            !string.Equals(
+                verifiedCryptoDex.Hash,
+                descriptor.CoreClrCryptoDexSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                "The Android CoreCLR crypto helper dex does not match payload.json.");
         }
 
         var dexIndices = archive.Entries
@@ -487,6 +502,7 @@ internal static class PayloadAssembler
         }
         var nextIndex = checked(dexIndices.Max() + 1);
         AddFile(archive, cryptoDex, $"classes{nextIndex}.dex");
+        return verifiedCryptoDex.Hash;
     }
 
     private static int? ParseDexIndex(string entryName)

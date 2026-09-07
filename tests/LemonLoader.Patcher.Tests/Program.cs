@@ -389,11 +389,46 @@ static Task TestReleaseValidationAsync()
         File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest));
         ReleaseValidator.Validate(root);
 
-        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot));
+        var android = CreateCoreClrReleaseFixture(testRoot);
+        var validated = ReleaseValidator.Validate(android);
+        using (var inputPayload = JsonDocument.Parse(File.ReadAllText(
+                   GamePackageLayout.FilePath(android, AndroidPayloadContract.PayloadManifestPath))))
+            AssertTrue(!inputPayload.RootElement.TryGetProperty("coreClrCryptoDexSha256", out _),
+                "New releases must not duplicate the DEX digest in payload.json.");
+        var androidApk = Path.Combine(testRoot, "android.apk");
+        CreateZip(androidApk, new Dictionary<string, string> { ["classes.dex"] = "game" });
+        PayloadAssembler.MergeApk(androidApk, new(android, CreateInteropTree(testRoot), null,
+            DeploymentPolicyOptions.Create(null, []), validated.VerifiedFiles));
+        using (var androidArchive = ZipFile.OpenRead(androidApk))
+        using (var descriptor = JsonDocument.Parse(ReadZipEntry(androidArchive, AndroidPayloadContract.PayloadManifestPath)))
+        using (var dex = androidArchive.GetEntry("classes2.dex")!.Open())
+            AssertEqual(Convert.ToHexString(SHA256.HashData(dex)).ToLowerInvariant(),
+                descriptor.RootElement.GetProperty("coreClrCryptoDexSha256").GetString());
+        File.AppendAllText(GamePackageLayout.FilePath(android, AndroidPayloadContract.CoreClrCryptoDexReleasePath), "corrupt");
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(android));
+        foreach (var badHash in new object[] { new string('0', 64), "invalid", 123 })
+            AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+                testRoot, includeCryptoDexMetadata: true, cryptoDexMetadata: badHash)));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot, includeCryptoDexMetadata: true,
+            cryptoDexMetadata: JsonSerializer.SerializeToElement<object?>(null)));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot,
+            includeCryptoDexMetadata: true));
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot, runtimeRid: "android-arm64"));
         var bionic = CreateCoreClrReleaseFixture(testRoot, includeAndroidCrypto: false,
             includeCryptoDex: false, runtimeRid: "linux-bionic-arm64");
         ReleaseValidator.Validate(bionic);
+        foreach (var fixture in new[] { root, bionic })
+        {
+            var actualDigests = Directory.EnumerateFiles(fixture, "*", SearchOption.AllDirectories)
+                .ToDictionary(path => Path.GetRelativePath(fixture, path).Replace('\\', '/'),
+                    path => (Size: new FileInfo(path).Length,
+                        Hash: Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant()),
+                    StringComparer.Ordinal);
+            foreach (var scope in new[] { "runtime/loader", "runtime/dotnet", "runtime/interop", "deployment" })
+                AssertEqual(AndroidPayloadContract.ComputeTreeHash(fixture, scope),
+                    AndroidPayloadContract.ComputeTreeHash(actualDigests, scope));
+        }
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
             testRoot, runtimeRid: "linux-bionic-arm64")));
         AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
@@ -408,6 +443,7 @@ static Task TestReleaseValidationAsync()
         {
             using var descriptor = JsonDocument.Parse(ReadZipEntry(bionicArchive, AndroidPayloadContract.PayloadManifestPath));
             AssertEqual("linux-bionic-arm64", descriptor.RootElement.GetProperty("runtimeRid").GetString());
+            AssertEqual(JsonValueKind.Null, descriptor.RootElement.GetProperty("coreClrCryptoDexSha256").ValueKind);
             AssertTrue(bionicArchive.GetEntry("classes.dex") is null, "Bionic must not inject JNI crypto DEX.");
         }
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
@@ -487,7 +523,9 @@ static string CreateCoreClrReleaseFixture(
     bool includeAdditionalIdentityProperty = false,
     bool includeRuntimeThreadFilterProperty = true,
     string? runtimeRid = null,
-    bool omitBionicSsl = false)
+    bool omitBionicSsl = false,
+    bool includeCryptoDexMetadata = false,
+    object? cryptoDexMetadata = null)
 {
     const string runtimeVersion = "10.0.10";
     const string runtimeBackend = "coreclr";
@@ -597,25 +635,26 @@ static string CreateCoreClrReleaseFixture(
             "assets/LemonLoader/runtime/dotnet/runtime-extra.json",
             "{\"producer\":\"fixture\"}"));
     }
+    var payload = new Dictionary<string, object>
+    {
+        ["formatVersion"] = AndroidPayloadContract.FormatVersion,
+        ["loaderSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/loader"),
+        ["dotnetSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/dotnet"),
+        ["interopSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/interop"),
+        ["deploymentSha256"] = ComputePayloadDirectoryHash(releaseRoot, "deployment"),
+        ["managedRuntimeBackend"] = runtimeBackend,
+        ["managedRuntimeIdentitySha256"] = runtimeIdentity.Hash,
+        ["deploymentProfile"] = "development",
+        ["deploymentRevisionSha256"] = ComputeDeploymentRevision([]),
+        ["deploymentFiles"] = Array.Empty<object>(),
+        ["privateNativeLibraries"] = privateNativeLibraries ?? []
+    };
+    if (runtimeRid is not null) payload["runtimeRid"] = runtimeRid;
+    if (includeCryptoDexMetadata) payload["coreClrCryptoDexSha256"] = cryptoDexMetadata ?? coreClrCryptoDexSha256!;
     files.Add(WritePayload(
         releaseRoot,
         "assets/LemonLoader/payload.json",
-        JsonSerializer.Serialize(new
-        {
-            formatVersion = AndroidPayloadContract.FormatVersion,
-            loaderSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/loader"),
-            dotnetSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/dotnet"),
-            interopSha256 = ComputePayloadDirectoryHash(releaseRoot, "runtime/interop"),
-            deploymentSha256 = ComputePayloadDirectoryHash(releaseRoot, "deployment"),
-            managedRuntimeBackend = runtimeBackend,
-            managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
-            coreClrCryptoDexSha256,
-            runtimeRid,
-            deploymentProfile = "development",
-            deploymentRevisionSha256 = ComputeDeploymentRevision([]),
-            deploymentFiles = Array.Empty<object>(),
-            privateNativeLibraries = privateNativeLibraries ?? []
-        })));
+        JsonSerializer.Serialize(payload)));
     var releaseManifest = new Dictionary<string, object>
     {
         ["formatVersion"] = 2,

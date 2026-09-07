@@ -22,6 +22,12 @@ Current Android/Bionic CoreCLR payloads carry
 its OpenSSL shim, private libraries and attribution instead of the JNI crypto
 DEX. This support does not qualify a development runtime for public release.
 
+Loader `v0.7.3-android.5` requires Patcher **1.1.0 or later**. Release inputs no
+longer repeat `coreClrCryptoDexSha256` in `payload.json`: `files[]` protects the
+fixed-path helper DEX. Patcher carries that verified digest into the final APK
+payload after promotion to `classesN.dex`. Older releases with the field remain
+supported and their declared digest is still checked. Bionic does not use a DEX.
+
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
 contract installed with the current version.

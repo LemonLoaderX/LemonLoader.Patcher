@@ -18,20 +18,7 @@ $releaseRoot = Join-Path $repositoryRoot "Output\Releases"
 $packageBase = Join-Path $repositoryRoot "Output\Packages"
 $packageRoot = Join-Path $packageBase $Version
 
-function Assert-ChildPath {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$Parent
-    )
-
-    $fullPath = [IO.Path]::GetFullPath($Path)
-    $fullParent = [IO.Path]::GetFullPath($Parent).TrimEnd(
-        [IO.Path]::DirectorySeparatorChar,
-        [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $fullPath.StartsWith($fullParent, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to modify '$fullPath' because it is outside '$fullParent'."
-    }
-}
+. (Join-Path $PSScriptRoot 'common/Paths.ps1')
 
 function Get-RequiredEntries([string]$RuntimeIdentifier) {
     $suffix = if ($RuntimeIdentifier -eq "win-x64") { ".exe" } else { "" }

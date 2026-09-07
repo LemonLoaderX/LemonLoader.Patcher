@@ -8,7 +8,7 @@ internal static class ReleaseValidator
     private const string PayloadManifestPath = AndroidPayloadContract.PayloadManifestPath;
     private const int AssetLayoutVersion = AndroidPayloadContract.FormatVersion;
 
-    public static void Validate(string releaseRoot)
+    public static ReleaseValidationResult Validate(string releaseRoot)
     {
         var root = Path.GetFullPath(releaseRoot);
         var manifestPath = Path.Combine(root, ManifestName);
@@ -25,6 +25,7 @@ internal static class ReleaseValidator
             throw new InvalidDataException("The LemonLoader Release contains game-specific assemblies.");
 
         var expectedFiles = new HashSet<string>(StringComparer.Ordinal);
+        var verifiedFiles = new Dictionary<string, (long Size, string Hash)>(StringComparer.Ordinal);
         foreach (var entry in manifest.GetProperty("files").EnumerateArray())
         {
             var relativePath = entry.GetProperty("path").GetString()
@@ -52,6 +53,7 @@ internal static class ReleaseValidator
             var actualHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
             if (!string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"Release file '{relativePath}' failed SHA-256 validation.");
+            verifiedFiles.Add(relativePath, (actualSize, actualHash));
         }
 
         if (!expectedFiles.Contains(MainLibraryPath) || !expectedFiles.Contains(PayloadManifestPath))
@@ -70,13 +72,15 @@ internal static class ReleaseValidator
                 $"Unexpected: [{string.Join(", ", unexpected)}]; missing: [{string.Join(", ", missing)}].");
         }
 
-        ValidateAndroidLayout(root, actualFiles, manifest);
+        ValidateAndroidLayout(root, actualFiles, manifest, verifiedFiles);
+        return new ReleaseValidationResult(root, verifiedFiles);
     }
 
     private static void ValidateAndroidLayout(
         string root,
         IReadOnlySet<string> files,
-        JsonElement releaseManifest)
+        JsonElement releaseManifest,
+        IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles)
     {
         var runtimeVersion = releaseManifest.GetProperty("managedRuntimeVersion").GetString();
         var configuration = releaseManifest.GetProperty("configuration").GetString();
@@ -113,11 +117,8 @@ internal static class ReleaseValidator
             $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/{runtimeEngineFile}";
         if (!files.Contains(runtimeEnginePath))
             throw new InvalidDataException("The Release managed runtime engine is missing.");
-        using (var input = File.OpenRead(Path.Combine(
-                   root,
-                   runtimeEnginePath.Replace('/', Path.DirectorySeparatorChar))))
         {
-            var actualRuntimeEngineHash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            var actualRuntimeEngineHash = verifiedFiles[runtimeEnginePath].Hash;
             if (!string.Equals(
                     runtimeEngineHash,
                     actualRuntimeEngineHash,
@@ -186,10 +187,8 @@ internal static class ReleaseValidator
             payload.GetProperty("managedRuntimeBackend").GetString());
         var payloadRuntimeIdentityHash =
             payload.GetProperty("managedRuntimeIdentitySha256").GetString();
-        using (var input = File.OpenRead(runtimeIdentityFile))
         {
-            var actualRuntimeIdentityHash =
-                Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+            var actualRuntimeIdentityHash = verifiedFiles[runtimeIdentityPath].Hash;
             if (payloadRuntimeBackend != runtimeBackend ||
                 payloadRuntimeIdentityHash is null ||
                 payloadRuntimeIdentityHash.Length != 64 ||
@@ -204,7 +203,7 @@ internal static class ReleaseValidator
             }
         }
         var deploymentHash = payload.GetProperty("deploymentSha256").GetString();
-        var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(root, "deployment");
+        var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, "deployment");
         if (deploymentHash is null || deploymentHash.Length != 64 ||
             deploymentHash.Any(character => !Uri.IsHexDigit(character)) ||
             !string.Equals(deploymentHash, actualDeploymentHash, StringComparison.OrdinalIgnoreCase))
@@ -229,7 +228,7 @@ internal static class ReleaseValidator
         {
             var property = payload.GetProperty(domain.Property);
             var hash = property.GetString();
-            var actualHash = AndroidPayloadContract.ComputeTreeHash(root, domain.Scope);
+            var actualHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, domain.Scope);
             if (hash is null || hash.Length != 64 ||
                 hash.Any(character => !Uri.IsHexDigit(character)) ||
                 !string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
@@ -270,7 +269,18 @@ internal static class ReleaseValidator
             $"{sharedRuntimeRoot}/libSystem.Security.Cryptography.Native.Android.so";
         var androidCryptoDexPath = AndroidPayloadContract.CoreClrCryptoDexReleasePath;
         var privateOpenSslRoot = "assets/LemonLoader/runtime/dotnet/native/openssl/";
-        var coreClrCryptoDexHash = payload.GetProperty("coreClrCryptoDexSha256");
+        var hasCoreClrCryptoDexHash = payload.TryGetProperty(
+            "coreClrCryptoDexSha256",
+            out var coreClrCryptoDexHash);
+        var hasNonNullCoreClrCryptoDexHash = hasCoreClrCryptoDexHash &&
+            coreClrCryptoDexHash.ValueKind != JsonValueKind.Null;
+        if (hasNonNullCoreClrCryptoDexHash &&
+            (coreClrCryptoDexHash.ValueKind != JsonValueKind.String ||
+             !IsSha256(coreClrCryptoDexHash.GetString()!)))
+        {
+            throw new InvalidDataException(
+                "The Android payload contains an invalid crypto helper dex hash.");
+        }
         var hasRuntimeRid = releaseManifest.TryGetProperty("runtimeRid", out var runtimeRid);
         if (releaseManifest.TryGetProperty("experimentalRuntimeRid", out var oldRid) &&
             (oldRid.GetString() != "linux-bionic-arm64" ||
@@ -292,7 +302,7 @@ internal static class ReleaseValidator
                  payloadRid.GetString() == "linux-bionic-arm64");
             if (!validRid ||
                 runtimeBackend != ManagedRuntimeBackend.CoreClr ||
-                coreClrCryptoDexHash.ValueKind != JsonValueKind.Null ||
+                hasNonNullCoreClrCryptoDexHash ||
                 files.Contains(androidCryptoPath) || files.Contains(androidCryptoDexPath))
                 throw new InvalidDataException("Invalid experimental Bionic runtime contract.");
             foreach (var name in new[] { "libSystem.Security.Cryptography.Native.OpenSsl.so", "libssl.so", "libcrypto.so" })
@@ -311,16 +321,10 @@ internal static class ReleaseValidator
                 throw new InvalidDataException(
                     "The Android CoreCLR Release is missing its source-built crypto library or helper dex.");
             }
-            var expectedCryptoDexHash = coreClrCryptoDexHash.GetString();
-            if (expectedCryptoDexHash is null || !IsSha256(expectedCryptoDexHash))
-                throw new InvalidDataException(
-                    "The Android CoreCLR payload has an invalid crypto helper dex hash.");
-            using (var input = File.OpenRead(Path.Combine(
-                       root,
-                       androidCryptoDexPath.Replace('/', Path.DirectorySeparatorChar))))
+            if (hasNonNullCoreClrCryptoDexHash)
             {
-                var actualCryptoDexHash =
-                    Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
+                var expectedCryptoDexHash = coreClrCryptoDexHash.GetString()!;
+                var actualCryptoDexHash = verifiedFiles[androidCryptoDexPath].Hash;
                 if (!string.Equals(
                         expectedCryptoDexHash,
                         actualCryptoDexHash,
@@ -338,7 +342,7 @@ internal static class ReleaseValidator
             return;
         }
 
-        if (coreClrCryptoDexHash.ValueKind != JsonValueKind.Null ||
+        if (hasNonNullCoreClrCryptoDexHash ||
             files.Contains(androidCryptoDexPath))
         {
             throw new InvalidDataException(
@@ -386,3 +390,7 @@ internal static class ReleaseValidator
     private static bool IsSha256(string value) =>
         value.Length == 64 && value.All(Uri.IsHexDigit);
 }
+
+internal sealed record ReleaseValidationResult(
+    string ReleaseRoot,
+    IReadOnlyDictionary<string, (long Size, string Hash)> VerifiedFiles);

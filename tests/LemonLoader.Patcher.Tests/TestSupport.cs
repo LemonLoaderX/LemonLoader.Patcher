@@ -18,7 +18,8 @@ internal static class TestSupport
                 releaseRoot,
                 interopRoot,
                 deploymentPath,
-                policies ?? DeploymentPolicyOptions.Create(null, [])));
+                policies ?? DeploymentPolicyOptions.Create(null, []),
+                GetReleaseFileDigests(releaseRoot)));
 
     public static void InjectDirectory(
         string gameRoot,
@@ -32,7 +33,8 @@ internal static class TestSupport
                 releaseRoot,
                 interopRoot,
                 deploymentPath,
-                policies ?? DeploymentPolicyOptions.Create(null, [])),
+                policies ?? DeploymentPolicyOptions.Create(null, []),
+                GetReleaseFileDigests(releaseRoot)),
             null);
 
     public static byte[] CreateUnityArchive()
@@ -83,13 +85,12 @@ internal static class TestSupport
                 engineFile = "libcoreclr.so",
                 engineSha256 = runtimeEngineHash
             }));
-        string? coreClrCryptoDexSha256 = null;
         if (includeCoreClrCryptoDex)
         {
-            coreClrCryptoDexSha256 = WritePayload(
+            WritePayload(
                 releaseRoot,
                 AndroidPayloadContract.CoreClrCryptoDexReleasePath,
-                "crypto-dex").Hash;
+                "crypto-dex");
         }
         foreach (var library in privateNativeLibraries ?? [])
         {
@@ -101,20 +102,19 @@ internal static class TestSupport
         WritePayload(
             releaseRoot,
             "assets/LemonLoader/payload.json",
-            JsonSerializer.Serialize(new
+            JsonSerializer.Serialize(new Dictionary<string, object>
             {
-                formatVersion = AndroidPayloadContract.FormatVersion,
-                loaderSha256 = new string('0', 64),
-                dotnetSha256 = new string('0', 64),
-                interopSha256 = new string('0', 64),
-                deploymentSha256 = new string('0', 64),
-                managedRuntimeBackend = runtimeBackend,
-                managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
-                coreClrCryptoDexSha256,
-                deploymentProfile = "development",
-                deploymentRevisionSha256 = ComputeDeploymentRevision([]),
-                deploymentFiles = Array.Empty<object>(),
-                privateNativeLibraries = privateNativeLibraries ?? []
+                ["formatVersion"] = AndroidPayloadContract.FormatVersion,
+                ["loaderSha256"] = new string('0', 64),
+                ["dotnetSha256"] = new string('0', 64),
+                ["interopSha256"] = new string('0', 64),
+                ["deploymentSha256"] = new string('0', 64),
+                ["managedRuntimeBackend"] = runtimeBackend,
+                ["managedRuntimeIdentitySha256"] = runtimeIdentity.Hash,
+                ["deploymentProfile"] = "development",
+                ["deploymentRevisionSha256"] = ComputeDeploymentRevision([]),
+                ["deploymentFiles"] = Array.Empty<object>(),
+                ["privateNativeLibraries"] = privateNativeLibraries ?? []
             }));
         return releaseRoot;
     }
@@ -244,6 +244,19 @@ internal static class TestSupport
         Directory.CreateDirectory(root);
         return root;
     }
+
+    private static IReadOnlyDictionary<string, (long Size, string Hash)> GetReleaseFileDigests(
+        string releaseRoot) =>
+        Directory.EnumerateFiles(releaseRoot, "*", SearchOption.AllDirectories)
+            .ToDictionary(
+                path => Path.GetRelativePath(releaseRoot, path).Replace('\\', '/'),
+                path =>
+                {
+                    using var input = File.OpenRead(path);
+                    return (input.Length,
+                        Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant());
+                },
+                StringComparer.Ordinal);
 
     public static void AssertTrue(bool condition, string message)
     {
