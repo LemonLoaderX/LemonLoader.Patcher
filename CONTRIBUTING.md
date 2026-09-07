@@ -7,6 +7,13 @@ behavior in a front end.
 
 ## Development workflow
 
+For publication, commit `docs/releases/<tag>.md` with the version change before
+pushing the version tag. Write the release body without a duplicate title.
+The tag workflow creates a draft, uploads CI assets, then publishes it. Do not
+manually create another Release. Retries replace draft assets only; binary
+changes after publication require a new version. Notes-only corrections do not
+require rebuilding or moving an existing tag.
+
 ```powershell
 pwsh -NoProfile -File scripts/test.ps1
 pwsh -NoProfile -File scripts/publish.ps1 `

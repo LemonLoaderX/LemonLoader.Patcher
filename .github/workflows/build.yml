@@ -108,6 +108,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Check out tagged release notes
+        uses: actions/checkout@v7
+
       - name: Download builds
         uses: actions/download-artifact@v8
         with:
@@ -119,18 +122,26 @@ jobs:
         working-directory: release-assets
         run: sha256sum LemonLoader.Patcher-* > SHA256SUMS.txt
 
-      - name: Create or update release
+      - name: Publish release from tagged notes
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-assets/* \
-              --repo "$GITHUB_REPOSITORY" --clobber
+          if draft=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft); then
+            if [[ "$draft" == false ]]; then
+              echo "Release $TAG is already public; leaving its assets and notes unchanged."
+              exit 0
+            fi
           else
-            gh release create "$TAG" release-assets/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --title "LemonLoader Patcher $TAG" \
-              --notes "Cross-platform CLI and GUI release for patching Android ARM64 IL2CPP applications. The .NET 10 runtime is required."
+            draft=missing
           fi
+          notes="docs/releases/$TAG.md"
+          test -s "$notes"
+          if [[ "$draft" == missing ]]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --draft --title "LemonLoader Patcher $TAG" --notes-file "$notes"
+          fi
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
+          gh release upload "$TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
