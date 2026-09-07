@@ -13,6 +13,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
+    ("Runtime release selection and cache isolation", TestRuntimeSelectionAsync),
     ("APK payload layout", TestApkPayloadLayoutAsync),
     ("Directory payload injection", TestDirectoryPayloadInjectionAsync),
     ("Deployment policy resolution", TestDeploymentPolicyResolutionAsync),
@@ -33,6 +34,38 @@ foreach (var test in tests)
 
 Console.WriteLine($"LemonLoader.Patcher tests passed: {tests.Length}");
 return;
+
+static async Task TestRuntimeSelectionAsync()
+{
+    var root = CreateTestRoot();
+    try
+    {
+        AssertEqual("android", RuntimeVariants.Normalize(null));
+        AssertThrows<ArgumentException>(() => RuntimeVariants.Normalize("linux-x64"));
+        foreach (var variant in new[] { "android", "bionic" })
+        {
+            var rid = variant == "android" ? "android-arm64" : "linux-bionic-arm64";
+            using var manifest = JsonDocument.Parse(JsonSerializer.Serialize(new { runtimeRid = rid }));
+            RuntimeVariants.ValidateManifest(manifest.RootElement, variant);
+            AssertThrows<InvalidDataException>(() => RuntimeVariants.ValidateManifest(
+                manifest.RootElement, variant == "android" ? "bionic" : "android"));
+            var cached = Path.Combine(root, RuntimeVariants.ArchiveName(variant));
+            CreateZip(cached, new Dictionary<string, string>
+            {
+                ["lemonloader-release.json"] = manifest.RootElement.GetRawText(),
+                [AndroidPayloadContract.PayloadManifestPath] = "{}"
+            });
+            AssertEqual(cached, await ReleaseResolver.ResolveLatestAsync(root, runtimeVariant: variant));
+        }
+        var input = Path.Combine(root, "input.apk");
+        File.WriteAllText(input, "fixture");
+        var request = CliRequestParser.ParsePatchRequest([input, "--output", Path.Combine(root, "output.apk"), "--runtime", "bionic"]);
+        AssertEqual("bionic", request.RuntimeVariant);
+        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
+            [input, "--output", Path.Combine(root, "output.apk"), "--runtime", "other"]));
+    }
+    finally { Directory.Delete(root, true); }
+}
 
 static Task TestUnityVersionNormalizationAsync()
 {
@@ -102,7 +135,7 @@ static Task TestInteropGeneratorOverrideAsync()
             BundledInteropGeneratorTool.Revision.All(Uri.IsHexDigit),
             "The bundled generator revision is not a full Git commit ID.");
         AssertEqual(
-            "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip",
+            "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-runtime-android-arm64.zip",
             ReleaseResolver.LatestUrl);
         File.WriteAllText(generatorPath, "generator-v2");
         var changedTool = InteropGeneratorTool.FromOverride(toolPath);
@@ -357,6 +390,26 @@ static Task TestReleaseValidationAsync()
         ReleaseValidator.Validate(root);
 
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot));
+        ReleaseValidator.Validate(CreateCoreClrReleaseFixture(testRoot, runtimeRid: "android-arm64"));
+        var bionic = CreateCoreClrReleaseFixture(testRoot, includeAndroidCrypto: false,
+            includeCryptoDex: false, runtimeRid: "linux-bionic-arm64");
+        ReleaseValidator.Validate(bionic);
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot, runtimeRid: "linux-bionic-arm64")));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot, includeAndroidCrypto: false, includeCryptoDex: false,
+            runtimeRid: "linux-bionic-arm64", omitBionicSsl: true)));
+        AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
+            testRoot, runtimeRid: "linux-x64")));
+        var bionicApk = Path.Combine(testRoot, "bionic.apk");
+        CreateZip(bionicApk, new Dictionary<string, string> { ["lib/arm64-v8a/libmain.so"] = "game" });
+        MergeApk(bionicApk, bionic, CreateInteropTree(testRoot), null);
+        using (var bionicArchive = ZipFile.OpenRead(bionicApk))
+        {
+            using var descriptor = JsonDocument.Parse(ReadZipEntry(bionicArchive, AndroidPayloadContract.PayloadManifestPath));
+            AssertEqual("linux-bionic-arm64", descriptor.RootElement.GetProperty("runtimeRid").GetString());
+            AssertTrue(bionicArchive.GetEntry("classes.dex") is null, "Bionic must not inject JNI crypto DEX.");
+        }
         ReleaseValidator.Validate(CreateCoreClrReleaseFixture(
             testRoot,
             includeRuntimeThreadFilterProperty: false));
@@ -432,7 +485,9 @@ static string CreateCoreClrReleaseFixture(
     bool includeLoaderDocumentation = false,
     bool includeAdditionalRuntimeMetadataFile = false,
     bool includeAdditionalIdentityProperty = false,
-    bool includeRuntimeThreadFilterProperty = true)
+    bool includeRuntimeThreadFilterProperty = true,
+    string? runtimeRid = null,
+    bool omitBionicSsl = false)
 {
     const string runtimeVersion = "10.0.10";
     const string runtimeBackend = "coreclr";
@@ -452,6 +507,16 @@ static string CreateCoreClrReleaseFixture(
             releaseRoot,
             $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/libSystem.Security.Cryptography.Native.Android.so",
             "android-crypto"));
+    }
+    if (runtimeRid == "linux-bionic-arm64")
+    {
+        foreach (var name in new[] { "libSystem.Security.Cryptography.Native.OpenSsl.so", "libssl.so", "libcrypto.so" })
+        {
+            if (omitBionicSsl && name == "libssl.so") continue;
+            files.Add(WritePayload(releaseRoot,
+                $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}/{name}", name));
+        }
+        files.Add(WritePayload(releaseRoot, "licenses/OpenSSL/LICENSE.txt", "license"));
     }
     string? coreClrCryptoDexSha256 = null;
     if (includeCryptoDex)
@@ -515,6 +580,11 @@ static string CreateCoreClrReleaseFixture(
     };
     if (includeAdditionalIdentityProperty)
         identity["producer"] = "fixture";
+    if (runtimeRid is not null)
+    {
+        identity["runtimeRid"] = runtimeRid;
+        identity["cryptoBackend"] = runtimeRid == "linux-bionic-arm64" ? "openssl" : "android-jni";
+    }
     var runtimeIdentity = WritePayload(
         releaseRoot,
         "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
@@ -540,6 +610,7 @@ static string CreateCoreClrReleaseFixture(
             managedRuntimeBackend = runtimeBackend,
             managedRuntimeIdentitySha256 = runtimeIdentity.Hash,
             coreClrCryptoDexSha256,
+            runtimeRid,
             deploymentProfile = "development",
             deploymentRevisionSha256 = ComputeDeploymentRevision([]),
             deploymentFiles = Array.Empty<object>(),
@@ -565,6 +636,7 @@ static string CreateCoreClrReleaseFixture(
     };
     if (includeRuntimeThreadFilterProperty)
         releaseManifest["managedRuntimeThreadFilterAvailable"] = false;
+    if (runtimeRid is not null) releaseManifest["runtimeRid"] = runtimeRid;
     File.WriteAllText(
         Path.Combine(releaseRoot, "lemonloader-release.json"),
         JsonSerializer.Serialize(releaseManifest));

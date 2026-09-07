@@ -30,7 +30,7 @@
             <StackPanel Margin="0,0,8,0" Spacing="18">
               <StackPanel Spacing="10">
                 <TextBlock Text="Package" Classes="section-title" />
-                <Grid ColumnDefinitions="132,*,36,36" RowDefinitions="Auto,Auto,Auto"
+                <Grid ColumnDefinitions="132,*,36,36" RowDefinitions="Auto,Auto,Auto,Auto"
                       ColumnSpacing="8" RowSpacing="8">
                   <TextBlock Text="Input" Classes="field-label" />
                   <TextBox x:Name="InputPath" Grid.Column="1"
@@ -49,7 +49,7 @@
                   <TextBlock Grid.Row="1" Text="LemonLoader Release" Classes="field-label" />
                   <TextBox x:Name="ReleasePath" Grid.Row="1" Grid.Column="1"
                            Classes="single-line"
-                           Watermark="Bundled Release or latest download" />
+                           Watermark="Local archive or selected runtime download" />
                   <Button Grid.Row="1" Grid.Column="2" Content="⋯" Classes="browse"
                           Tag="ReleasePath" Click="BrowseFileClick"
                           AutomationProperties.Name="Choose LemonLoader Release"
@@ -63,6 +63,11 @@
                           Click="BrowseOutputApkClick"
                           AutomationProperties.Name="Choose output APK"
                           ToolTip.Tip="Choose output APK" />
+                  <TextBlock Grid.Row="3" Text="Runtime" Classes="field-label" />
+                  <ComboBox x:Name="RuntimeVariant" Grid.Row="3" Grid.Column="1" SelectedIndex="0">
+                    <ComboBoxItem Content="Android ARM64 (default)" Tag="android" />
+                    <ComboBoxItem Content="Linux Bionic ARM64" Tag="bionic" />
+                  </ComboBox>
                 </Grid>
               </StackPanel>
 

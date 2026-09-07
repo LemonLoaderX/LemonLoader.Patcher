@@ -139,6 +139,14 @@ internal static class ReleaseValidator
                    File.ReadAllText(runtimeIdentityFile)))
         {
             var identity = runtimeIdentityDocument.RootElement;
+            if (releaseManifest.TryGetProperty("runtimeRid", out var identityRid))
+            {
+                var cryptoBackend = identityRid.GetString() == "linux-bionic-arm64" ? "openssl" : "android-jni";
+                if (!identity.TryGetProperty("runtimeRid", out var actualRid) ||
+                    actualRid.GetString() != identityRid.GetString() ||
+                    !identity.TryGetProperty("cryptoBackend", out var actualCrypto) || actualCrypto.GetString() != cryptoBackend)
+                    throw new InvalidDataException("Runtime RID/cryptography identity differs from the Release.");
+            }
             if (identity.GetProperty("formatVersion").GetInt32() != 1 ||
                 identity.GetProperty("runtimeVersion").GetString() != runtimeVersion ||
                 identity.GetProperty("backend").GetString() != runtimeBackendName ||
@@ -263,6 +271,39 @@ internal static class ReleaseValidator
         var androidCryptoDexPath = AndroidPayloadContract.CoreClrCryptoDexReleasePath;
         var privateOpenSslRoot = "assets/LemonLoader/runtime/dotnet/native/openssl/";
         var coreClrCryptoDexHash = payload.GetProperty("coreClrCryptoDexSha256");
+        var hasRuntimeRid = releaseManifest.TryGetProperty("runtimeRid", out var runtimeRid);
+        if (releaseManifest.TryGetProperty("experimentalRuntimeRid", out var oldRid) &&
+            (oldRid.GetString() != "linux-bionic-arm64" ||
+             (hasRuntimeRid && runtimeRid.GetString() != oldRid.GetString())))
+            throw new InvalidDataException("Conflicting runtime RID metadata.");
+        if (hasRuntimeRid)
+        {
+            if (runtimeRid.GetString() is not ("android-arm64" or "linux-bionic-arm64") ||
+                !payload.TryGetProperty("runtimeRid", out var declaredRid) ||
+                declaredRid.GetString() != runtimeRid.GetString())
+                throw new InvalidDataException("Runtime RID metadata does not match the payload.");
+        }
+        if ((hasRuntimeRid && runtimeRid.GetString() == "linux-bionic-arm64") ||
+            releaseManifest.TryGetProperty("experimentalRuntimeRid", out _))
+        {
+            var validRid = hasRuntimeRid ||
+                (releaseManifest.GetProperty("experimentalRuntimeRid").GetString() == "linux-bionic-arm64" &&
+                 payload.TryGetProperty("experimentalRuntimeRid", out var payloadRid) &&
+                 payloadRid.GetString() == "linux-bionic-arm64");
+            if (!validRid ||
+                runtimeBackend != ManagedRuntimeBackend.CoreClr ||
+                coreClrCryptoDexHash.ValueKind != JsonValueKind.Null ||
+                files.Contains(androidCryptoPath) || files.Contains(androidCryptoDexPath))
+                throw new InvalidDataException("Invalid experimental Bionic runtime contract.");
+            foreach (var name in new[] { "libSystem.Security.Cryptography.Native.OpenSsl.so", "libssl.so", "libcrypto.so" })
+            {
+                if (!files.Contains($"{sharedRuntimeRoot}/{name}"))
+                    throw new InvalidDataException($"Experimental Bionic runtime is missing '{name}'.");
+            }
+            if (hasRuntimeRid && !files.Contains("licenses/OpenSSL/LICENSE.txt"))
+                throw new InvalidDataException("Bionic runtime has no OpenSSL attribution.");
+            return;
+        }
         if (runtimeBackend == ManagedRuntimeBackend.CoreClr)
         {
             if (!files.Contains(androidCryptoPath) || !files.Contains(androidCryptoDexPath))

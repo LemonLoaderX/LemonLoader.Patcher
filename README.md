@@ -14,6 +14,14 @@ rejected rather than migrated.
 
 ## CLI
 
+Use `--runtime android|bionic` or the GUI Runtime selector. Android is the default
+download, and caches are isolated by variant. A local `--release` without
+`--runtime` selects that archive; when both are supplied their RIDs must match.
+Current Android/Bionic CoreCLR payloads carry
+`runtimeRid` in release, payload and runtime identity metadata. Bionic requires
+its OpenSSL shim, private libraries and attribution instead of the JNI crypto
+DEX. This support does not qualify a development runtime for public release.
+
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
 contract installed with the current version.
@@ -43,6 +51,7 @@ not be given `--output`.
 | Option | Required | Description and default |
 | --- | --- | --- |
 | `--release <path>` | No | Local `LemonLoader-Android-arm64.zip`. When omitted, Patcher uses a valid cache beside the output and otherwise downloads the latest Release. |
+| `--runtime <android\|bionic>` | No | Select the download variant (default Android), or assert the runtime of a local Release. |
 | `--deployment <directory>` | No | Directory mirrored into the runtime MelonLoader root. It may contain `Mods`, `Plugins`, `UserLibs`, `UserData`, or future top-level directories. |
 | `--profile <name>` | No | Deployment behavior: `development`, `production`, or `locked`. Defaults to `development`. |
 | `--policy <path=policy>` | No | Overrides one file or `directory/**`. Repeatable. Policies are `seed`, `upgrade`, `refresh`, and `enforce`. Every rule must match a packaged file. |
@@ -246,7 +255,8 @@ so the runtime already required by Patcher is sufficient.
 
 The Patcher does not include a LemonLoader Release archive. Without `--release`,
 it downloads and caches
-`https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip`.
+`LemonLoader-runtime-android-arm64.zip` or `LemonLoader-runtime-bionic-arm64.zip`
+from the latest Loader release according to the runtime selection.
 Use `--release <path>` for an explicit local or offline build.
 
 ## GUI

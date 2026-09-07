@@ -277,7 +277,17 @@ internal static class PayloadAssembler
         if (!IsSha256(descriptor.ManagedRuntimeIdentitySha256))
             throw new InvalidDataException(
                 "Android payload manifest contains an invalid managed runtime identity hash.");
-        if (runtimeBackend == ManagedRuntimeBackend.CoreClr &&
+        if (descriptor.RuntimeRid is not null && descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
+            throw new InvalidDataException("Unsupported runtime RID.");
+        if (descriptor.RuntimeRid == "linux-bionic-arm64" &&
+            (runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.CoreClrCryptoDexSha256 is not null))
+            throw new InvalidDataException("Invalid Bionic cryptography metadata.");
+        if (descriptor.ExperimentalRuntimeRid is not null &&
+            (descriptor.ExperimentalRuntimeRid != "linux-bionic-arm64" ||
+             runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.CoreClrCryptoDexSha256 is not null))
+            throw new InvalidDataException("Invalid experimental runtime payload metadata.");
+        if (runtimeBackend == ManagedRuntimeBackend.CoreClr && descriptor.ExperimentalRuntimeRid is null &&
+            descriptor.RuntimeRid != "linux-bionic-arm64" &&
             (descriptor.CoreClrCryptoDexSha256 is null ||
              !IsSha256(descriptor.CoreClrCryptoDexSha256)))
         {
@@ -573,7 +583,9 @@ internal static class PayloadAssembler
         string DeploymentProfile,
         string DeploymentRevisionSha256,
         IReadOnlyList<DeploymentFileDescriptor> DeploymentFiles,
-        IReadOnlyList<string> PrivateNativeLibraries);
+        IReadOnlyList<string> PrivateNativeLibraries,
+        string? ExperimentalRuntimeRid = null,
+        string? RuntimeRid = null);
 
     internal sealed record DeploymentFileDescriptor(
         string Path,

@@ -2,7 +2,7 @@ internal static class CliRequestParser
 {
     private static readonly string[] PatchValueOptions =
     [
-        "--output", "--release", "--deployment", "--profile", "--policy",
+        "--output", "--release", "--runtime", "--deployment", "--profile", "--policy",
         "--game-assembly", "--metadata", "--unity-version", "--unity-libraries",
         "--interop-output", "--cpp2il", "--il2cppinterop-cli", "--zipalign",
         "--keystore", "--key-alias", "--apksigner"
@@ -28,6 +28,7 @@ internal static class CliRequestParser
                 InputPath = args[0],
                 OutputPath = parsed.Optional("--output"),
                 ReleasePath = parsed.Optional("--release"),
+                RuntimeVariant = parsed.Optional("--runtime"),
                 DeploymentPath = parsed.Optional("--deployment"),
                 DeploymentPolicies = DeploymentPolicyOptions.Create(
                     parsed.Optional("--profile"),

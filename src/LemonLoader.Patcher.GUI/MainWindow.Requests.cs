@@ -28,6 +28,7 @@ public sealed partial class MainWindow
                 ? Optional(OutputApkPath)
                 : Required(OutputApkPath, "Choose an output APK."),
             ReleasePath = Optional(ReleasePath),
+            RuntimeVariant = (RuntimeVariant.SelectedItem as ComboBoxItem)?.Tag?.ToString(),
             DeploymentPath = Optional(DeploymentPath),
             DeploymentPolicies = DeploymentPolicyOptions.Create(profile, rules),
             UnityVersion = Optional(UnityVersion),

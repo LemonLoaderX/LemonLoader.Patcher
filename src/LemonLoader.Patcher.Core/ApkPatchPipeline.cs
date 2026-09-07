@@ -76,7 +76,8 @@ public sealed class ApkPatchPipeline
         var releaseArchive = request.ReleasePath ?? await ReleaseResolver.ResolveLatestAsync(
             request.ToolCacheRoot,
             progress,
-            cancellationToken);
+            cancellationToken,
+            RuntimeVariants.Normalize(request.RuntimeVariant));
         if (!File.Exists(releaseArchive))
         {
             throw new FileNotFoundException(
@@ -85,6 +86,12 @@ public sealed class ApkPatchPipeline
         var releaseRoot = Path.Combine(workRoot, "release");
         ZipFile.ExtractToDirectory(releaseArchive, releaseRoot);
         ReleaseValidator.Validate(releaseRoot);
+        if (request.RuntimeVariant is not null || request.ReleasePath is null)
+        {
+            using var manifest = System.Text.Json.JsonDocument.Parse(
+                File.ReadAllText(Path.Combine(releaseRoot, "lemonloader-release.json")));
+            RuntimeVariants.ValidateManifest(manifest.RootElement, RuntimeVariants.Normalize(request.RuntimeVariant));
+        }
         return releaseRoot;
     }
 

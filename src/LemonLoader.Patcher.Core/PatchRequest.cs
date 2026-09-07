@@ -15,6 +15,7 @@ public sealed record PatchRequest
     public required string InputPath { get; init; }
     public string? OutputPath { get; init; }
     public string? ReleasePath { get; init; }
+    public string? RuntimeVariant { get; init; }
     public string? DeploymentPath { get; init; }
     public DeploymentPolicyOptions DeploymentPolicies { get; init; } =
         DeploymentPolicyOptions.Create(null, []);
@@ -48,6 +49,7 @@ public sealed record PatchRequest
 
     public PatchRequest NormalizeAndValidate()
     {
+        if (RuntimeVariant is not null) RuntimeVariants.Normalize(RuntimeVariant);
         static string FullPath(string value, string name)
         {
             if (string.IsNullOrWhiteSpace(value))

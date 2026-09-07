@@ -154,6 +154,7 @@ public static class CliApplication
 
         Optional payload:
           --release <path>                Local LemonLoader Release; otherwise latest/cache
+          --runtime <android|bionic>       Download variant (default android); assert local Release RID
           --deployment <directory>        MelonLoader mirror containing Mods, Plugins,
                                           UserLibs, UserData, or future top-level folders
           --profile <name>                development (default), production, or locked

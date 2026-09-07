@@ -100,18 +100,21 @@ internal static class Cpp2IlResolver
 
 internal static class ReleaseResolver
 {
-    private const string ReleaseFileName = "LemonLoader-Android-arm64.zip";
     internal const string LatestUrl =
-        "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-Android-arm64.zip";
+        "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-runtime-android-arm64.zip";
 
     public static async Task<string> ResolveLatestAsync(
         string root,
         IProgress<PatcherMessage>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string runtimeVariant = RuntimeVariants.Default)
     {
+        runtimeVariant = RuntimeVariants.Normalize(runtimeVariant);
+        var releaseFileName = RuntimeVariants.ArchiveName(runtimeVariant);
+        var latestUrl = "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/" + releaseFileName;
         Directory.CreateDirectory(root);
-        var path = Path.Combine(root, ReleaseFileName);
-        if (File.Exists(path) && IsReadableRelease(path))
+        var path = Path.Combine(root, releaseFileName);
+        if (File.Exists(path) && IsReadableRelease(path, runtimeVariant))
         {
             progress?.Report(new(
                 PatcherMessageKind.Stage,
@@ -122,12 +125,12 @@ internal static class ReleaseResolver
             File.Delete(path);
 
         progress?.Report(new(PatcherMessageKind.Stage, "Downloading LemonLoader Release"));
-        var temporaryPath = Path.Combine(root, $".{ReleaseFileName}.{Guid.NewGuid():N}.download");
+        var temporaryPath = Path.Combine(root, $".{releaseFileName}.{Guid.NewGuid():N}.download");
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             using var response = await client.GetAsync(
-                LatestUrl,
+                latestUrl,
                 HttpCompletionOption.ResponseHeadersRead,
                 cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -141,7 +144,7 @@ internal static class ReleaseResolver
             {
                 await response.Content.CopyToAsync(output, cancellationToken);
             }
-            if (!IsReadableRelease(temporaryPath))
+            if (!IsReadableRelease(temporaryPath, runtimeVariant))
             {
                 throw new InvalidDataException(
                     "Downloaded LemonLoader Release is not a valid Release archive.");
@@ -155,7 +158,7 @@ internal static class ReleaseResolver
                 ? "no HTTP status"
                 : $"{(int)exception.StatusCode.Value} {exception.StatusCode.Value}";
             throw new InvalidOperationException(
-                $"Could not download the latest LemonLoader Release from '{LatestUrl}' " +
+                $"Could not download the latest LemonLoader Release from '{latestUrl}' " +
                 $"({status}). Choose a local Release archive with --release or try again " +
                 "when the Release repository is available.",
                 exception);
@@ -167,17 +170,22 @@ internal static class ReleaseResolver
         }
     }
 
-    private static bool IsReadableRelease(string archivePath)
+    private static bool IsReadableRelease(string archivePath, string variant)
     {
         try
         {
             using var archive = ZipFile.OpenRead(archivePath);
-            return archive.GetEntry("lemonloader-release.json") is not null &&
-                   archive.GetEntry(AndroidPayloadContract.PayloadManifestPath) is not null;
+            var manifest = archive.GetEntry("lemonloader-release.json");
+            if (manifest is null || archive.GetEntry(AndroidPayloadContract.PayloadManifestPath) is null) return false;
+            using var input = manifest.Open();
+            using var document = System.Text.Json.JsonDocument.Parse(input);
+            RuntimeVariants.ValidateManifest(document.RootElement, variant);
+            return true;
         }
         catch (InvalidDataException)
         {
             return false;
         }
+        catch (System.Text.Json.JsonException) { return false; }
     }
 }
