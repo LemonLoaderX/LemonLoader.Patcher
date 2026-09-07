@@ -18,6 +18,7 @@ that root are supported. It is not an executable entry point. Product scripts
 must not depend on workspace helper files so this repository remains standalone.
 
 Signing and installation are not implicit steps of these scripts. Local
-`-AllowDirtySource` publishing is development-only. See ../README.md for command
-examples and the release contract. Script syntax/helper regression tests are also
+`-AllowDirtySource` publishing is development-only. See [README](../README.md#build-local-packages)
+for commands and [Contributing](../CONTRIBUTING.md) for tag-driven publication.
+Script syntax/helper regression tests are also
 available from the containing workspace's scripts/test-scripts.ps1.

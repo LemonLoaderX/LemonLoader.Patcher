@@ -173,10 +173,10 @@ Tool paths can instead be supplied explicitly:
 CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --output game-lemonloader.apk `
     --align `
-    --zipalign <android-sdk>\build-tools\<version>\zipalign.exe `
+    --zipalign "<android-sdk>\build-tools\<version>\zipalign.exe" `
     --keystore signing.jks `
     --key-alias release `
-    --apksigner <android-sdk>\build-tools\<version>\apksigner.bat
+    --apksigner "<android-sdk>\build-tools\<version>\apksigner.bat"
 ```
 
 ### Deployment behavior
@@ -207,8 +207,8 @@ Deployment/
 Exact rules take precedence over directory rules; longer matching directory
 rules take precedence over shorter ones. Examples:
 
-```powershell
---policy "Mods/Required.dll=enforce" `
+```text
+--policy "Mods/Required.dll=enforce"
 --policy "UserData/Managed/**=refresh"
 ```
 
@@ -298,14 +298,18 @@ The CLI parser and application runner are separate modules. The GUI code-behind 
 split into operation, request, picker, and logging partials; neither front end
 duplicates Core patch behavior.
 
-## Build and publish
+## Build local packages
+
+These commands create local output, not GitHub releases. For publication, follow
+the version-tag workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```powershell
 pwsh -NoProfile -File scripts/test.ps1
 pwsh -NoProfile -File scripts/publish.ps1 `
-  -Runtime win-x64 `
   -Il2CppInteropSourceRoot ..\dependencies\Il2CppInterop
-pwsh -NoProfile -File scripts/package-release.ps1 -Version v1.0.4
+[xml]$properties = Get-Content Directory.Build.props -Raw
+pwsh -NoProfile -File scripts/package-release.ps1 `
+  -Version "v$($properties.Project.PropertyGroup.Version)"
 ```
 
 Stable outputs use the same acronym casing as the products:
@@ -317,13 +321,14 @@ Output/Releases/win-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
 Output/Releases/linux-x64/CLI/LemonLoader.Patcher.CLI
 Output/Releases/linux-x64/GUI/LemonLoader.Patcher.GUI
 Output/Releases/linux-x64/Tools/Il2CppInterop/Il2CppInterop.CLI.dll
-Output/Packages/v1.0.4/LemonLoader.Patcher-win-x64.zip
-Output/Packages/v1.0.4/LemonLoader.Patcher-linux-x64.tar.gz
-Output/Packages/v1.0.4/SHA256SUMS.txt
+Output/Packages/<tag>/LemonLoader.Patcher-win-x64.zip
+Output/Packages/<tag>/LemonLoader.Patcher-linux-x64.tar.gz
+Output/Packages/<tag>/SHA256SUMS.txt
 ```
 
-Publishing uses a fresh staging directory and atomically replaces the runtime
-output. It builds the pinned, clean Il2CppInterop generator source and packages
+Local publishing builds both RIDs by default. To build only one, pass the same
+`-Runtime` to both scripts. Publishing uses fresh staging and atomically replaces
+the per-RID output. It builds the pinned, clean Il2CppInterop generator source and packages
 one shared tool directory beside `CLI` and `GUI`. A LemonLoader Release ZIP is
 explicitly rejected from Patcher output. Generated game artifacts such as
 `.cpp2il`, `.tools`, and `Il2CppAssemblies` are also rejected.
