@@ -1,0 +1,38 @@
+# Pin the generator to git-cliff 2.10.1 in CI.
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+## {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.breaking %}**BREAKING:** {% endif %}{% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first }} ([{{ commit.id | truncate(length=7, end="") }}](https://github.com/LemonLoaderX/LemonLoader.Patcher/commit/{{ commit.id }}))
+{% if commit.breaking_description %}
+  {{ commit.breaking_description }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+postprocessors = [
+  { pattern = '^\s+', replace = "" },
+  { pattern = '\n{3,}', replace = "\n\n" },
+]
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+commit_parsers = [
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Fixes" },
+  { message = "^perf", group = "<!-- 2 -->Performance" },
+  { message = "^(build|chore)\\(deps", group = "<!-- 3 -->Dependencies" },
+  { message = "^refactor", group = "<!-- 4 -->Refactoring" },
+  { message = "^docs", group = "<!-- 5 -->Documentation" },
+  { message = "^(build|ci|test|chore|style|release)", group = "<!-- 6 -->Maintenance" },
+  { message = ".*", group = "<!-- 7 -->Other changes" },
+]
+filter_commits = false
+sort_commits = "oldest"

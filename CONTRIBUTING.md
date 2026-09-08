@@ -7,8 +7,13 @@ behavior in a front end.
 
 ## Development workflow
 
-For publication, commit `docs/releases/<tag>.md` with the version change before
-pushing the version tag. Write the release body without a duplicate title.
+See [automatic release notes](docs/releases/README.md) for commit conventions,
+baseline selection, optional additions, and local/CI preview commands.
+
+For publication, update the version and push reviewed source followed by its tag.
+CI generates the release body from commits. Only commit `docs/releases/<tag>.md`
+when extra upgrade or compatibility information is needed; it is prepended to
+the automatic changes.
 The tag workflow creates a draft, uploads CI assets, then publishes it. Do not
 manually create another Release. Retries replace draft assets only; binary
 changes after publication require a new version. Notes-only corrections do not

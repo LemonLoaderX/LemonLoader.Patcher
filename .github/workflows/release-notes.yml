@@ -1,0 +1,44 @@
+name: Preview release notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Next version tag (does not need to exist yet)
+        required: true
+        type: string
+      previous_tag:
+        description: Previous tag (empty to auto-detect, root for first release)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff@2.10.1
+
+      - name: Generate notes for review
+        env:
+          TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          bash scripts/generate-release-notes.sh "$TAG" "$PREVIOUS_TAG" "$GITHUB_SHA" > "$RUNNER_TEMP/release-notes.md"
+          cat "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload review copy
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+          retention-days: 14
