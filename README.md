@@ -357,3 +357,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for repository and validation rules and
 [SECURITY.md](SECURITY.md) for private vulnerability reporting. LemonLoader
 Patcher is licensed under Apache-2.0; bundled tools retain their own license files
 and source provenance.
+
+## External tool cancellation
+
+The external-tool deadline and cancellation token cover both process exit and
+stdout/stderr draining. If a descendant inherits an output pipe after the direct
+child exits, cancellation stops waiting for that pipe. The runner kills the
+process tree while its direct child is still running; it cannot discover detached
+or already-reparented descendants after the parent exits.
+
+`pwsh -NoProfile -File scripts/test.ps1` includes a self-spawning regression for
+this inherited-pipe case, without requiring Python or Android SDK tools.

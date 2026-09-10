@@ -4,6 +4,19 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using static TestSupport;
+using System.Diagnostics;
+
+if (args is ["--hold-output", var readyFile])
+{
+    File.WriteAllText(readyFile, Environment.ProcessId.ToString());
+    await Task.Delay(TimeSpan.FromSeconds(15));
+    return;
+}
+if (args is ["--spawn-output-holder", var childFile])
+{
+    using var child = Process.Start(SelfStartInfo("--hold-output", childFile));
+    return;
+}
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -23,7 +36,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Optional APK post-processing contract", TestPostProcessingContractAsync),
     ("External Android tool resolution", TestExternalToolResolutionAsync),
     ("CLI contract", TestCliContractAsync),
-    ("Directory replacement", TestDirectoryReplacementAsync)
+    ("Directory replacement", TestDirectoryReplacementAsync),
+    ("External tool output drain cancellation", TestOutputDrainCancellationAsync)
 };
 
 foreach (var test in tests)
@@ -34,6 +48,51 @@ foreach (var test in tests)
 
 Console.WriteLine($"LemonLoader.Patcher tests passed: {tests.Length}");
 return;
+
+static ProcessStartInfo SelfStartInfo(params string[] arguments)
+{
+    var info = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false, CreateNoWindow = true };
+    if (Path.GetFileNameWithoutExtension(Environment.ProcessPath!).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        info.ArgumentList.Add(typeof(TestSupport).Assembly.Location);
+    foreach (var argument in arguments) info.ArgumentList.Add(argument);
+    return info;
+}
+
+static async Task TestOutputDrainCancellationAsync()
+{
+    var root = CreateTestRoot();
+    var readyFile = Path.Combine(root, "child.pid");
+    using var cancellation = new CancellationTokenSource();
+    var info = SelfStartInfo("--spawn-output-holder", readyFile);
+    var run = ProcessRunner.RunAsync(info.FileName, null, cancellation.Token, info.ArgumentList.ToArray());
+    try
+    {
+        var deadline = Stopwatch.StartNew();
+        while (!File.Exists(readyFile) && deadline.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(20);
+        if (!File.Exists(readyFile)) throw new Exception("Output holder did not start.");
+        await Task.Delay(200); // Let the direct child exit while its descendant holds both pipes.
+        if (run.IsCompleted) throw new Exception("Inherited output pipes were not held open.");
+        cancellation.Cancel();
+        await AssertThrowsAsync<OperationCanceledException>(async () =>
+            await run.WaitAsync(TimeSpan.FromSeconds(3)));
+    }
+    finally
+    {
+        cancellation.Cancel();
+        if (File.Exists(readyFile))
+        {
+            try
+            {
+                using var child = Process.GetProcessById(int.Parse(File.ReadAllText(readyFile)));
+                if (!child.HasExited) child.Kill(true);
+                await child.WaitForExitAsync();
+            }
+            catch (ArgumentException) { } // Holder already exited.
+        }
+        Directory.Delete(root, true);
+    }
+}
 
 static async Task TestRuntimeSelectionAsync()
 {

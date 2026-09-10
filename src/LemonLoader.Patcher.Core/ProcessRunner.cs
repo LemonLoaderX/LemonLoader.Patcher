@@ -36,38 +36,40 @@ internal static class ProcessRunner
         progress?.Report(new(PatcherMessageKind.Stage, $"Running {Path.GetFileName(fileName)}"));
         using var process = Process.Start(info)
             ?? throw new InvalidOperationException($"Could not start '{fileName}'.");
-        var standardOutput = ForwardOutputAsync(process.StandardOutput, progress);
-        var standardError = ForwardOutputAsync(process.StandardError, progress);
         using var timeout = new CancellationTokenSource(DefaultTimeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             timeout.Token);
+        var standardOutput = ForwardOutputAsync(process.StandardOutput, progress, linked.Token);
+        var standardError = ForwardOutputAsync(process.StandardError, progress, linked.Token);
         try
         {
             await process.WaitForExitAsync(linked.Token);
+            await Task.WhenAll(standardOutput, standardError);
         }
         catch (OperationCanceledException)
         {
             if (!process.HasExited)
                 process.Kill(true);
             await process.WaitForExitAsync(CancellationToken.None);
-            await Task.WhenAll(standardOutput, standardError);
+            try { await Task.WhenAll(standardOutput, standardError); }
+            catch (OperationCanceledException) when (linked.IsCancellationRequested) { }
             if (cancellationToken.IsCancellationRequested)
                 throw;
             throw new TimeoutException(
                 $"'{fileName}' did not finish within {DefaultTimeout.TotalMinutes:0} minutes.");
         }
 
-        await Task.WhenAll(standardOutput, standardError);
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"'{fileName}' failed with exit code {process.ExitCode}.");
     }
 
     private static async Task ForwardOutputAsync(
         StreamReader reader,
-        IProgress<PatcherMessage>? progress)
+        IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken)
     {
-        while (await reader.ReadLineAsync() is { } line)
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             if (!string.IsNullOrWhiteSpace(line))
                 progress?.Report(new(PatcherMessageKind.ToolOutput, line));
