@@ -20,13 +20,14 @@ foreach ($rid in @('win-x64','linux-x64')) {
         [IO.File]::SetLastWriteTimeUtc($path,[DateTime]::new(2020,1,1,0,0,0,[DateTimeKind]::Utc))
     }
 }
+[void][IO.Directory]::CreateDirectory((Join-Path $product 'Output/Releases/win-x64/Tools/empty/nested'))
 $package = Join-Path $scripts 'package-release.ps1'
 $output = Join-Path $product 'Output/Packages/v1.2.3'
 & pwsh -NoProfile -File $package -Version v1.2.3
 if ($LASTEXITCODE -ne 0) { throw 'Initial fixture packaging failed.' }
 $first = @{}
 foreach ($file in Get-ChildItem $output -File) { $first[$file.Name] = (Get-FileHash $file.FullName).Hash }
-Start-Sleep -Milliseconds 1100
+Start-Sleep -Milliseconds 2200
 & pwsh -NoProfile -File $package -Version v1.2.3
 if ($LASTEXITCODE -ne 0) { throw 'Repeated fixture packaging failed.' }
 foreach ($file in Get-ChildItem $output -File) {

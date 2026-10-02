@@ -32,6 +32,8 @@ and do not require a containing workspace.
 Linux archives use GNU tar headers with fixed times/ownership and executable
 CLI/GUI modes. Same-toolchain repacking of unchanged files is checked across
 processes; historical PAX archives remain ordinary readable tar.gz inputs.
+Windows ZIP entries use ordinal file order and fixed times. Both archives include
+published files, not empty directory scaffolding.
 
 Cleanup is restricted to this product. It preserves source caches, shared
 dependencies, diagnostic fixtures, private/unknown Output directories and

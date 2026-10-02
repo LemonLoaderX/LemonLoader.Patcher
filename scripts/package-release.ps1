@@ -73,6 +73,27 @@ function Assert-Zip([string]$Path, [string]$RuntimeIdentifier) {
     }
 }
 
+function New-WindowsArchive([string]$SourceRoot, [string]$Destination) {
+    $files = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Force) {
+        $files[[IO.Path]::GetRelativePath($SourceRoot, $file.FullName).Replace('\', '/')] = $file.FullName
+    }
+    [string[]]$names = @($files.Keys)
+    [Array]::Sort($names, [StringComparer]::Ordinal)
+    $archive = [IO.Compression.ZipFile]::Open($Destination, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($name in $names) {
+            $entry = $archive.CreateEntry($name, [IO.Compression.CompressionLevel]::Optimal)
+            $entry.LastWriteTime = [DateTimeOffset]::new(2020, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
+            $input = [IO.File]::OpenRead($files[$name])
+            try {
+                $output = $entry.Open()
+                try { $input.CopyTo($output) } finally { $output.Dispose() }
+            } finally { $input.Dispose() }
+        }
+    } finally { $archive.Dispose() }
+}
+
 function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
     $regularMode = [System.IO.UnixFileMode](
         [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite -bor
@@ -190,9 +211,7 @@ try {
 
         if ($runtimeIdentifier -eq "win-x64") {
             $asset = Join-Path $packageRoot "LemonLoader.Patcher-win-x64.zip"
-            Compress-Archive -Path (Join-Path $runtimeRoot "*") `
-                -DestinationPath $asset `
-                -CompressionLevel Optimal
+            New-WindowsArchive -SourceRoot $runtimeRoot -Destination $asset
             Assert-Zip -Path $asset -RuntimeIdentifier $runtimeIdentifier
         }
         else {

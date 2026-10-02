@@ -1,4 +1,4 @@
-# Agent Note: Cross-process deterministic Linux archives
+# Agent Note: Cross-process deterministic release archives
 
 Status: implemented
 
@@ -7,13 +7,17 @@ Status: implemented
 System.Formats.Tar generates PAX extended-header names using Environment.ProcessId.
 Fixing ordinary entry modification times does not make the resulting tar.gz bytes
 stable between packaging processes. Same-process repack tests miss this behavior.
+Compress-Archive also assigns the current time to empty directory ZIP entries.
+Fixtures containing only files miss that independent source of nondeterminism.
 
 ## Decision
 
 Linux packaging uses the standard library's GNU tar writer and GNU entries, with
 fixed modification, access and change times. This retains long filenames and Unix
 executable modes without process-specific PAX header names or archive rewriting.
-Windows ZIP packaging is unchanged. Consumers use ordinary tar.gz extraction;
+Windows uses structured ZIP entries in ordinal path order with fixed times,
+including all published files but omitting unnecessary empty directory entries,
+as Linux packaging already does. Consumers use ordinary ZIP/tar.gz extraction;
 there is no new product/schema version or requirement to reject historical PAX.
 
 The script regression invokes the real packager in separate PowerShell processes
@@ -34,6 +38,7 @@ It runs in the normal script suite and uses only isolated Output/Tests fixtures.
 ## Consequences
 
 New Linux archives use GNU headers; existing PAX archives remain readable.
+Empty directories are not part of the release contract and are not archived.
 No binaries, dependencies or APK payloads change. Identical published files can
 be repackaged deterministically across processes on the same toolchain; this does
 not claim cross-runtime gzip equivalence or deterministic recompilation.
