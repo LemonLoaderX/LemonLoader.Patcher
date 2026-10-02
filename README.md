@@ -318,8 +318,8 @@ the version-tag workflow in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```powershell
 pwsh -NoProfile -File scripts/test.ps1
-pwsh -NoProfile -File scripts/publish.ps1 `
-  -Il2CppInteropSourceRoot ..\dependencies\Il2CppInterop
+pwsh -NoProfile -File scripts/setup-dependencies.ps1
+pwsh -NoProfile -File scripts/publish.ps1
 [xml]$properties = Get-Content Directory.Build.props -Raw
 pwsh -NoProfile -File scripts/package-release.ps1 `
   -Version "v$($properties.Project.PropertyGroup.Version)"
@@ -353,6 +353,15 @@ explicitly rejected from Patcher output. Generated game artifacts such as
 Formal publishing also requires a clean Patcher worktree. `-AllowDirtySource`
 exists only for local output-layout validation and its output must not be
 uploaded.
+
+Patcher owns the generator URL/revision in `Directory.Build.props`. Default setup
+and publishing use `../Il2CppInterop` only when HEAD matches Patcher's pin;
+otherwise they use `.dependencies/Il2CppInterop/<revision>` inside Patcher.
+Setup clones missing inputs and verifies existing ones without fetch/checkout.
+It never switches shared siblings for a different product pin. Publishing is
+offline once sources are prepared. `-Il2CppInteropSourceRoot` selects an explicit
+checkout and retains strict revision checks. No parent lock or Loader checkout is
+required. `scripts/test.ps1` includes local Git preservation/resolution fixtures.
 
 Binary releases are published at
 `https://github.com/LemonLoaderX/LemonLoader.Patcher/releases`.

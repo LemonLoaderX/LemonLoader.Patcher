@@ -73,29 +73,15 @@ jobs:
         run: |
           [xml]$properties = Get-Content Directory.Build.props -Raw
           $version = "v$($properties.Project.PropertyGroup.Version)"
-          $interopRevision = [string]$properties.Project.PropertyGroup.BundledIl2CppInteropRevision
-          if ($interopRevision -notmatch '^[0-9a-f]{40}$') {
-            throw "BundledIl2CppInteropRevision is invalid."
-          }
           if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME -cne $version) {
             throw "Tag '$env:GITHUB_REF_NAME' does not match '$version'."
           }
           "version=$version" >> $env:GITHUB_OUTPUT
-          "interop_revision=$interopRevision" >> $env:GITHUB_OUTPUT
 
       - name: Check out maintained Il2CppInterop
         shell: pwsh
         run: |
-          $source = Join-Path $env:RUNNER_TEMP "Il2CppInterop"
-          git clone --filter=blob:none --no-checkout `
-            https://github.com/LemonLoaderX/Il2CppInterop.git $source
-          if ($LASTEXITCODE -ne 0) {
-            throw "Cloning Il2CppInterop failed."
-          }
-          git -C $source checkout --detach "${{ steps.metadata.outputs.interop_revision }}"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Checking out the pinned Il2CppInterop revision failed."
-          }
+          pwsh -NoProfile -File scripts/setup-dependencies.ps1
 
       - name: Run regression tests
         shell: pwsh
@@ -105,8 +91,7 @@ jobs:
         shell: pwsh
         run: |
           pwsh -NoProfile -File scripts/publish.ps1 `
-            -Runtime "${{ matrix.runtime }}" `
-            -Il2CppInteropSourceRoot "$env:RUNNER_TEMP/Il2CppInterop"
+            -Runtime "${{ matrix.runtime }}"
           pwsh -NoProfile -File scripts/package-release.ps1 `
             -Version "${{ steps.metadata.outputs.version }}" `
             -Runtime "${{ matrix.runtime }}"

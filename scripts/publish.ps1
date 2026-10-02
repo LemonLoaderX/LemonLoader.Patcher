@@ -24,9 +24,8 @@ $expectedIl2CppInteropRevision = [string](
 if ($expectedIl2CppInteropRevision -notmatch '^[0-9a-f]{40}$') {
     throw "Directory.Build.props does not define a valid bundled Il2CppInterop revision."
 }
-if ([string]::IsNullOrWhiteSpace($Il2CppInteropSourceRoot)) {
-    $Il2CppInteropSourceRoot = Join-Path $repositoryRoot "..\dependencies\Il2CppInterop"
-}
+. (Join-Path $PSScriptRoot 'common/Dependencies.ps1')
+$Il2CppInteropSourceRoot = Get-InteropSourceRoot -RepositoryRoot $repositoryRoot -SourceRoot $Il2CppInteropSourceRoot
 $Il2CppInteropSourceRoot = [System.IO.Path]::GetFullPath($Il2CppInteropSourceRoot)
 $interopProject = Join-Path $Il2CppInteropSourceRoot "Il2CppInterop.CLI\Il2CppInterop.CLI.csproj"
 $interopLicense = Join-Path $Il2CppInteropSourceRoot "LICENSE"

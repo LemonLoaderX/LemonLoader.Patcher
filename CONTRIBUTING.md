@@ -21,9 +21,8 @@ require rebuilding or moving an existing tag.
 
 ```powershell
 pwsh -NoProfile -File scripts/test.ps1
-pwsh -NoProfile -File scripts/publish.ps1 `
-    -Runtime win-x64 `
-    -Il2CppInteropSourceRoot "<path-to-Il2CppInterop>"
+pwsh -NoProfile -File scripts/setup-dependencies.ps1
+pwsh -NoProfile -File scripts/publish.ps1 -Runtime win-x64
 ```
 
 Tests use generated fixtures. Do not commit APKs, decoded applications, Interop

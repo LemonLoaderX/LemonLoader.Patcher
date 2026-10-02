@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+& (Join-Path $PSScriptRoot 'test-dependencies.ps1')
 $patcherTests = Join-Path $repositoryRoot "tests\LemonLoader.Patcher.Tests\LemonLoader.Patcher.Tests.csproj"
 dotnet run --project $patcherTests --configuration $Configuration -- `
     --verify-apk-script (Join-Path $PSScriptRoot 'verify-apk-layout.ps1')
