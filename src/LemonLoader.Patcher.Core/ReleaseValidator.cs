@@ -86,6 +86,7 @@ internal static class ReleaseValidator
         var configuration = releaseManifest.GetProperty("configuration").GetString();
         var runtimeBackendName = releaseManifest.GetProperty("managedRuntimeBackend").GetString();
         var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(runtimeBackendName);
+        var cryptoDexMode = AndroidPayloadContract.ReadCryptoDexMode(releaseManifest);
         var runtimeHostingModel = runtimeBackend == ManagedRuntimeBackend.CoreClr
             ? "coreclr-host-api"
             : "hostfxr";
@@ -140,6 +141,8 @@ internal static class ReleaseValidator
                    File.ReadAllText(runtimeIdentityFile)))
         {
             var identity = runtimeIdentityDocument.RootElement;
+            if (AndroidPayloadContract.ReadCryptoDexMode(identity) != cryptoDexMode)
+                throw new InvalidDataException("Runtime crypto DEX mode differs from the Release.");
             if (releaseManifest.TryGetProperty("runtimeRid", out var identityRid))
             {
                 var cryptoBackend = identityRid.GetString() == "linux-bionic-arm64" ? "openssl" : "android-jni";
@@ -181,6 +184,20 @@ internal static class ReleaseValidator
             root,
             PayloadManifestPath.Replace('/', Path.DirectorySeparatorChar))));
         var payload = payloadDocument.RootElement;
+        if (AndroidPayloadContract.ReadCryptoDexMode(payload) != cryptoDexMode)
+            throw new InvalidDataException("Payload crypto DEX mode differs from the Release.");
+        if (cryptoDexMode == "embedded")
+        {
+            if (runtimeBackend != ManagedRuntimeBackend.CoreClr ||
+                !releaseManifest.TryGetProperty("runtimeRid", out var embeddedRid) || embeddedRid.GetString() != "android-arm64" ||
+                !releaseManifest.TryGetProperty("minimumAndroidApi", out var releaseApi) || releaseApi.ValueKind != JsonValueKind.Number || !releaseApi.TryGetInt32(out var minimumApi) || minimumApi < 26 ||
+                !payload.TryGetProperty("minimumAndroidApi", out var payloadApi) || payloadApi.ValueKind != JsonValueKind.Number || !payloadApi.TryGetInt32(out var declaredApi) || declaredApi != minimumApi ||
+                !payload.TryGetProperty("coreClrCryptoBootstrapSha256", out var bootstrapHash) || bootstrapHash.ValueKind != JsonValueKind.String ||
+                bootstrapHash.GetString() != verifiedFiles[MainLibraryPath].Hash)
+                throw new InvalidDataException("Invalid embedded crypto identity, API level or bootstrap hash.");
+        }
+        else if (payload.TryGetProperty("coreClrCryptoBootstrapSha256", out var unexpectedBootstrap) && unexpectedBootstrap.ValueKind != JsonValueKind.Null)
+            throw new InvalidDataException("An external crypto payload declares embedded bootstrap metadata.");
         if (payload.GetProperty("formatVersion").GetInt32() != AssetLayoutVersion)
             throw new InvalidDataException("The Android payload manifest has an unsupported format version.");
         var payloadRuntimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
@@ -316,10 +333,11 @@ internal static class ReleaseValidator
         }
         if (runtimeBackend == ManagedRuntimeBackend.CoreClr)
         {
-            if (!files.Contains(androidCryptoPath) || !files.Contains(androidCryptoDexPath))
+            if (!files.Contains(androidCryptoPath) ||
+                (cryptoDexMode == "embedded" ? files.Contains(androidCryptoDexPath) || hasNonNullCoreClrCryptoDexHash : !files.Contains(androidCryptoDexPath)))
             {
                 throw new InvalidDataException(
-                    "The Android CoreCLR Release is missing its source-built crypto library or helper dex.");
+                    "The Android CoreCLR Release has incomplete or mixed crypto library/helper DEX inputs.");
             }
             if (hasNonNullCoreClrCryptoDexHash)
             {

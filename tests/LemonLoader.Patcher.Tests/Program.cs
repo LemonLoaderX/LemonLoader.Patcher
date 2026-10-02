@@ -18,6 +18,7 @@ if (args is ["--spawn-output-holder", var childFile])
     return;
 }
 
+var apkVerificationScript = args is ["--verify-apk-script", var script] ? Path.GetFullPath(script) : null;
 var tests = new (string Name, Func<Task> Run)[]
 {
     ("Unity version normalization", TestUnityVersionNormalizationAsync),
@@ -26,6 +27,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
+    ("Embedded Android crypto payload", () => TestEmbeddedCryptoAsync(apkVerificationScript)),
     ("Runtime release selection and cache isolation", TestRuntimeSelectionAsync),
     ("APK payload layout", TestApkPayloadLayoutAsync),
     ("Directory payload injection", TestDirectoryPayloadInjectionAsync),
@@ -569,6 +571,85 @@ static Task TestReleaseValidationAsync()
     return Task.CompletedTask;
 }
 
+static async Task TestEmbeddedCryptoAsync(string? verificationScript)
+{
+    var root = CreateTestRoot();
+    try
+    {
+        var release = CreateCoreClrReleaseFixture(root, includeCryptoDex: false,
+            runtimeRid: "android-arm64", cryptoDexMode: "embedded");
+        var validated = ReleaseValidator.Validate(release);
+        var interop = CreateInteropTree(root);
+        var source = new PayloadSource(release, interop, null,
+            DeploymentPolicyOptions.Create(null, []), validated.VerifiedFiles);
+        var apk = Path.Combine(root, "embedded.apk");
+        CreateZip(apk, new Dictionary<string, string>
+        {
+            ["classes.dex"] = "game-primary",
+            ["classes3.dex"] = "game-secondary"
+        });
+        PayloadAssembler.MergeApk(apk, source);
+        using (var archive = ZipFile.OpenRead(apk))
+        {
+            AssertEqual("game-primary", ReadZipEntry(archive, "classes.dex"));
+            AssertEqual("game-secondary", ReadZipEntry(archive, "classes3.dex"));
+            AssertEqual(2, archive.Entries.Count(entry => entry.FullName.EndsWith(".dex")));
+            using var payload = JsonDocument.Parse(ReadZipEntry(archive, AndroidPayloadContract.PayloadManifestPath));
+            AssertEqual("embedded", payload.RootElement.GetProperty("coreClrCryptoDexMode").GetString());
+            AssertEqual(26, payload.RootElement.GetProperty("minimumAndroidApi").GetInt32());
+            AssertEqual(validated.VerifiedFiles["lib/arm64-v8a/libmain.so"].Hash,
+                payload.RootElement.GetProperty("coreClrCryptoBootstrapSha256").GetString());
+            AssertEqual(JsonValueKind.Null, payload.RootElement.GetProperty("coreClrCryptoDexSha256").ValueKind);
+        }
+        var game = Path.Combine(root, "directory");
+        WritePayload(game, "lib/arm64-v8a/libmain.so", "game-main");
+        WritePayload(game, "lib/arm64-v8a/libunity.so", "game-unity");
+        Directory.CreateDirectory(Path.Combine(game, "smali"));
+        PayloadAssembler.InjectDirectory(game, source, null);
+        AssertEqual(0, Directory.GetFiles(game, "*.dex").Length);
+
+        if (verificationScript is not null)
+        {
+            await ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                "-NoProfile", "-File", verificationScript, "-ApkPath", apk);
+            var legacy = CreateCoreClrReleaseFixture(root);
+            var legacyApk = Path.Combine(root, "legacy.apk");
+            CreateZip(legacyApk, new Dictionary<string, string> { ["classes.dex"] = "game" });
+            MergeApk(legacyApk, legacy, interop, null);
+            await ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                "-NoProfile", "-File", verificationScript, "-ApkPath", legacyApk);
+            using (var archive = ZipFile.Open(apk, ZipArchiveMode.Update))
+            {
+                archive.GetEntry("lib/arm64-v8a/libmain.so")!.Delete();
+                using var writer = new StreamWriter(archive.CreateEntry("lib/arm64-v8a/libmain.so").Open());
+                writer.Write("tampered-bootstrap");
+            }
+            var rejected = false;
+            try
+            {
+                await ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                    "-NoProfile", "-File", verificationScript, "-ApkPath", apk);
+            }
+            catch (InvalidOperationException) { rejected = true; }
+            AssertTrue(rejected, "APK verification must reject a changed embedded-crypto bootstrap.");
+        }
+
+        foreach (var invalid in new[]
+        {
+            CreateCoreClrReleaseFixture(root, runtimeRid: "android-arm64", cryptoDexMode: "embedded"),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, cryptoDexMode: "embedded"),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, runtimeRid: "android-arm64", cryptoDexMode: "unknown"),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, runtimeRid: "android-arm64", cryptoDexMode: "embedded", minimumApi: 25),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, runtimeRid: "android-arm64", cryptoDexMode: "embedded", bootstrapHashOverride: new string('0', 64)),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, runtimeRid: "android-arm64", cryptoDexMode: "embedded", identityDexMode: "unknown"),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, includeAndroidCrypto: false, runtimeRid: "android-arm64", cryptoDexMode: "embedded"),
+            CreateCoreClrReleaseFixture(root, includeCryptoDex: false, includeAndroidCrypto: false, runtimeRid: "linux-bionic-arm64", cryptoDexMode: "embedded")
+        })
+            AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(invalid));
+    }
+    finally { Directory.Delete(root, true); }
+}
+
 static string CreateCoreClrReleaseFixture(
     string root,
     bool includeAndroidCrypto = true,
@@ -584,7 +665,11 @@ static string CreateCoreClrReleaseFixture(
     string? runtimeRid = null,
     bool omitBionicSsl = false,
     bool includeCryptoDexMetadata = false,
-    object? cryptoDexMetadata = null)
+    object? cryptoDexMetadata = null,
+    string? cryptoDexMode = null,
+    int minimumApi = 26,
+    string? bootstrapHashOverride = null,
+    string? identityDexMode = null)
 {
     const string runtimeVersion = "10.0.10";
     const string runtimeBackend = "coreclr";
@@ -677,6 +762,7 @@ static string CreateCoreClrReleaseFixture(
     };
     if (includeAdditionalIdentityProperty)
         identity["producer"] = "fixture";
+    if (cryptoDexMode is not null) identity["coreClrCryptoDexMode"] = identityDexMode ?? cryptoDexMode;
     if (runtimeRid is not null)
     {
         identity["runtimeRid"] = runtimeRid;
@@ -709,6 +795,12 @@ static string CreateCoreClrReleaseFixture(
         ["privateNativeLibraries"] = privateNativeLibraries ?? []
     };
     if (runtimeRid is not null) payload["runtimeRid"] = runtimeRid;
+    if (cryptoDexMode is not null)
+    {
+        payload["coreClrCryptoDexMode"] = cryptoDexMode;
+        payload["minimumAndroidApi"] = minimumApi;
+        payload["coreClrCryptoBootstrapSha256"] = bootstrapHashOverride ?? files.Single(file => file.Path == "lib/arm64-v8a/libmain.so").Hash;
+    }
     if (includeCryptoDexMetadata) payload["coreClrCryptoDexSha256"] = cryptoDexMetadata ?? coreClrCryptoDexSha256!;
     files.Add(WritePayload(
         releaseRoot,
@@ -735,6 +827,11 @@ static string CreateCoreClrReleaseFixture(
     if (includeRuntimeThreadFilterProperty)
         releaseManifest["managedRuntimeThreadFilterAvailable"] = false;
     if (runtimeRid is not null) releaseManifest["runtimeRid"] = runtimeRid;
+    if (cryptoDexMode is not null)
+    {
+        releaseManifest["coreClrCryptoDexMode"] = cryptoDexMode;
+        releaseManifest["minimumAndroidApi"] = minimumApi;
+    }
     File.WriteAllText(
         Path.Combine(releaseRoot, "lemonloader-release.json"),
         JsonSerializer.Serialize(releaseManifest));

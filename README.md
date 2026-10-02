@@ -28,6 +28,12 @@ fixed-path helper DEX. Patcher carries that verified digest into the final APK
 payload after promotion to `classesN.dex`. Older releases with the field remain
 supported and their declared digest is still checked. Bionic does not use a DEX.
 
+Active Android source builds embed crypto helper DEX bytes in `libmain.so` and
+require API 26+. Releases explicitly declaring `coreClrCryptoDexMode: embedded`
+are patched without adding a `classesN.dex`; bootstrap identity is verified
+instead. Older Releases retain the promoted-DEX path. The new Loader needs a
+rebuilt matching runtime with explicit helper-ClassLoader initialization.
+
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
 contract installed with the current version.

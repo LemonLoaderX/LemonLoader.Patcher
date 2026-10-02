@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 internal enum ManagedRuntimeBackend
 {
@@ -20,6 +21,15 @@ internal static class AndroidPayloadContract
     public const string CoreClrCryptoDexFileName = "lemonloader-coreclr-crypto.dex";
     public const string CoreClrCryptoDexReleasePath =
         $"tools/android/{CoreClrCryptoDexFileName}";
+
+    public static string? ReadCryptoDexMode(JsonElement metadata)
+    {
+        if (!metadata.TryGetProperty("coreClrCryptoDexMode", out var mode) || mode.ValueKind == JsonValueKind.Null)
+            return null;
+        if (mode.ValueKind != JsonValueKind.String || mode.GetString() != "embedded")
+            throw new InvalidDataException("Unsupported Android crypto DEX mode.");
+        return "embedded";
+    }
 
     public static ManagedRuntimeBackend ParseManagedRuntimeBackend(string? value) => value switch
     {

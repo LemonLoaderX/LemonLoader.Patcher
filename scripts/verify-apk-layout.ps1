@@ -229,6 +229,21 @@ try {
     $androidCryptoEntry = $archive.GetEntry(
         "$sharedRuntimeRoot/libSystem.Security.Cryptography.Native.Android.so")
     $coreClrCryptoDexHash = [string]$payload.coreClrCryptoDexSha256
+    $cryptoDexMode = [string]$payload.coreClrCryptoDexMode
+    if ($cryptoDexMode -and $cryptoDexMode -cne 'embedded') { throw 'Unsupported APK crypto DEX mode.' }
+    if ([string]$runtimeIdentity.coreClrCryptoDexMode -cne $cryptoDexMode) { throw 'APK crypto DEX mode differs from runtime identity.' }
+    if ($cryptoDexMode -ceq 'embedded') {
+        $bootstrapEntry = $archive.GetEntry('lib/arm64-v8a/libmain.so')
+        if ($payload.runtimeRid -cne 'android-arm64' -or $payload.managedRuntimeBackend -cne 'coreclr' -or
+            $runtimeIdentity.runtimeRid -cne 'android-arm64' -or $runtimeIdentity.cryptoBackend -cne 'android-jni' -or
+            $payload.experimentalRuntimeRid -or
+            ($payload.minimumAndroidApi -isnot [long] -and $payload.minimumAndroidApi -isnot [int]) -or
+            $payload.minimumAndroidApi -lt 26 -or $null -eq $bootstrapEntry -or
+            $payload.coreClrCryptoBootstrapSha256 -cne (Get-EntrySha256 -Entry $bootstrapEntry) -or
+            -not [string]::IsNullOrEmpty($coreClrCryptoDexHash)) {
+            throw 'Invalid APK embedded crypto identity, API level or bootstrap hash.'
+        }
+    } elseif ($payload.coreClrCryptoBootstrapSha256) { throw 'External crypto payload declares embedded bootstrap metadata.' }
     if ($payload.runtimeRid -ceq 'linux-bionic-arm64' -or
         $payload.experimentalRuntimeRid -ceq 'linux-bionic-arm64') {
         if ($payload.managedRuntimeBackend -cne 'coreclr' -or
@@ -249,20 +264,22 @@ try {
     }
     elseif ($payload.managedRuntimeBackend -ceq "coreclr") {
         if ($null -eq $androidCryptoEntry -or
-            $coreClrCryptoDexHash -notmatch '^[0-9a-f]{64}$') {
+            ($cryptoDexMode -cne 'embedded' -and $coreClrCryptoDexHash -notmatch '^[0-9a-f]{64}$')) {
             throw "APK CoreCLR payload is missing its Android crypto library or helper dex hash."
         }
         if ("lemcrypto.so" -cin $privateLibraries -or
             "lemssl.so" -cin $privateLibraries) {
             throw "APK CoreCLR payload still declares private OpenSSL dependencies."
         }
-        $promotedDexEntries = @($archive.Entries | Where-Object {
-            $_.FullName -match '^classes(?:(?:[2-9][0-9]*|1[0-9]+))?\.dex$' -and
-            (Get-EntrySha256 -Entry $_) -ceq $coreClrCryptoDexHash
-        })
-        if ($promotedDexEntries.Count -ne 1 -or
-            $promotedDexEntries[0].FullName -ceq "classes.dex") {
-            throw "APK does not contain exactly one promoted Android CoreCLR crypto dex."
+        if ($cryptoDexMode -cne 'embedded') {
+            $promotedDexEntries = @($archive.Entries | Where-Object {
+                $_.FullName -match '^classes(?:(?:[2-9][0-9]*|1[0-9]+))?\.dex$' -and
+                (Get-EntrySha256 -Entry $_) -ceq $coreClrCryptoDexHash
+            })
+            if ($promotedDexEntries.Count -ne 1 -or
+                $promotedDexEntries[0].FullName -ceq "classes.dex") {
+                throw "APK does not contain exactly one promoted Android CoreCLR crypto dex."
+            }
         }
     }
     else {

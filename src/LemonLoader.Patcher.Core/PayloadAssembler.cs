@@ -281,6 +281,18 @@ internal static class PayloadAssembler
         }
         var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
             descriptor.ManagedRuntimeBackend);
+        if (descriptor.CoreClrCryptoDexMode is not null and not "embedded")
+            throw new InvalidDataException("Unsupported Android crypto DEX mode.");
+        if (descriptor.CoreClrCryptoDexMode == "embedded")
+        {
+            if (runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.RuntimeRid != "android-arm64" ||
+                descriptor.ExperimentalRuntimeRid is not null || descriptor.MinimumAndroidApi < 26 ||
+                descriptor.CoreClrCryptoDexSha256 is not null || descriptor.CoreClrCryptoBootstrapSha256 is null ||
+                !IsSha256(descriptor.CoreClrCryptoBootstrapSha256))
+                throw new InvalidDataException("Invalid embedded crypto payload metadata.");
+        }
+        else if (descriptor.CoreClrCryptoBootstrapSha256 is not null)
+            throw new InvalidDataException("An external crypto payload declares embedded bootstrap metadata.");
         if (!IsSha256(descriptor.ManagedRuntimeIdentitySha256))
             throw new InvalidDataException(
                 "Android payload manifest contains an invalid managed runtime identity hash.");
@@ -468,6 +480,14 @@ internal static class PayloadAssembler
         if (runtimeBackend != ManagedRuntimeBackend.CoreClr || isBionic)
             return null;
 
+        if (descriptor.CoreClrCryptoDexMode == "embedded")
+        {
+            if (!source.VerifiedReleaseFiles.TryGetValue("lib/arm64-v8a/libmain.so", out var bootstrap) ||
+                descriptor.CoreClrCryptoBootstrapSha256 != bootstrap.Hash)
+                throw new InvalidDataException("Embedded crypto bootstrap does not match the verified Release.");
+            return null;
+        }
+
         var cryptoDex = GamePackageLayout.FilePath(
             source.ReleaseRoot,
             AndroidPayloadContract.CoreClrCryptoDexReleasePath);
@@ -601,7 +621,10 @@ internal static class PayloadAssembler
         IReadOnlyList<DeploymentFileDescriptor> DeploymentFiles,
         IReadOnlyList<string> PrivateNativeLibraries,
         string? ExperimentalRuntimeRid = null,
-        string? RuntimeRid = null);
+        string? RuntimeRid = null,
+        string? CoreClrCryptoDexMode = null,
+        string? CoreClrCryptoBootstrapSha256 = null,
+        int MinimumAndroidApi = 0);
 
     internal sealed record DeploymentFileDescriptor(
         string Path,

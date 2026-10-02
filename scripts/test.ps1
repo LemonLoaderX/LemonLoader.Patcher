@@ -8,7 +8,8 @@ $ErrorActionPreference = "Stop"
 
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $patcherTests = Join-Path $repositoryRoot "tests\LemonLoader.Patcher.Tests\LemonLoader.Patcher.Tests.csproj"
-dotnet run --project $patcherTests --configuration $Configuration
+dotnet run --project $patcherTests --configuration $Configuration -- `
+    --verify-apk-script (Join-Path $PSScriptRoot 'verify-apk-layout.ps1')
 if ($LASTEXITCODE -ne 0) {
     throw "The LemonLoader.Patcher regression tests failed with exit code $LASTEXITCODE."
 }
