@@ -18,7 +18,7 @@ function Get-InteropSourceRoot {
     $dependency = Get-InteropDependency -RepositoryRoot $RepositoryRoot
     $sibling = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot '../Il2CppInterop'))
     if (Test-Path -LiteralPath (Join-Path $sibling '.git')) {
-        $head = @(& git -C $sibling rev-parse HEAD 2>$null)
+        $head = @(& git -c core.longpaths=true -C $sibling rev-parse HEAD 2>$null)
         if ($LASTEXITCODE -eq 0 -and $head.Count -eq 1 -and $head[0].Trim() -ceq $dependency.Revision) {
             return $sibling
         }
@@ -29,11 +29,11 @@ function Get-InteropSourceRoot {
 function Assert-InteropSourceCheckout {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Revision)
     if (!(Test-Path -LiteralPath (Join-Path $Path '.git'))) { throw "Source is not a Git checkout: '$Path'." }
-    $head = @(& git -C $Path rev-parse HEAD)
+    $head = @(& git -c core.longpaths=true -C $Path rev-parse HEAD)
     if ($LASTEXITCODE -ne 0 -or $head.Count -ne 1 -or $head[0].Trim() -cne $Revision) {
         throw "Source '$Path' does not match Patcher's pin '$Revision'; use a separate checkout."
     }
-    $changes = @(& git -C $Path status --porcelain)
+    $changes = @(& git -c core.longpaths=true -C $Path status --porcelain)
     if ($LASTEXITCODE -ne 0 -or $changes.Count) { throw "Source '$Path' has local changes; setup will not modify it." }
 }
 
@@ -48,14 +48,18 @@ function Initialize-InteropSourceCheckout {
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
     $staging = "$Path.staging-$([Guid]::NewGuid().ToString('N'))"
     try {
-        & git -c core.longpaths=true clone --config core.longpaths=true --filter=blob:none --no-checkout $Url $staging
+        $cloneArguments = @('--config', 'core.longpaths=true', '--no-checkout')
+        if ($Url.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
+            $cloneArguments += '--filter=blob:none'
+        }
+        & git -c core.longpaths=true clone @cloneArguments $Url $staging
         if ($LASTEXITCODE -ne 0) { throw "Could not clone '$Url'." }
-        & git -C $staging cat-file -e "$Revision^{commit}" 2>$null
+        & git -c core.longpaths=true -C $staging cat-file -e "$Revision^{commit}" 2>$null
         if ($LASTEXITCODE -ne 0) {
-            & git -C $staging fetch --no-tags origin $Revision
+            & git -c core.longpaths=true -C $staging fetch --no-tags origin $Revision
             if ($LASTEXITCODE -ne 0) { throw "Patcher's pinned revision '$Revision' is unavailable from '$Url'." }
         }
-        & git -C $staging checkout --detach $Revision
+        & git -c core.longpaths=true -C $staging checkout --detach $Revision
         if ($LASTEXITCODE -ne 0) { throw 'Checking out the pinned generator failed.' }
         Assert-InteropSourceCheckout -Path $staging -Revision $Revision
         [IO.Directory]::Move($staging, $Path)
