@@ -7,6 +7,10 @@ behavior in a front end.
 
 ## Development workflow
 
+Use PowerShell 7 and a stable .NET 10 SDK. The product's global.json selects the
+latest installed .NET 10 feature band, matching CI's 10.0.x policy rather than
+inheriting an SDK choice from a parent checkout.
+
 See [automatic release notes](docs/releases/README.md) for commit conventions,
 baseline selection, optional additions, and local/CI preview commands.
 
