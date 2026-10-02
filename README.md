@@ -318,6 +318,11 @@ pwsh -NoProfile -File scripts/package-release.ps1 `
   -Version "v$($properties.Project.PropertyGroup.Version)"
 ```
 
+To also check a freshly built Loader ZIP against Patcher's production release
+contract, run `scripts/test.ps1 -ReleaseArchive "<Loader-release.zip>"`. Multiple
+paths are accepted. This needs no game inputs and does not install or sign an APK;
+it supplements synthetic regressions, not real-device acceptance.
+
 Stable outputs use the same acronym casing as the products:
 
 ```text

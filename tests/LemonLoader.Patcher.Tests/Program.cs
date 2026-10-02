@@ -6,6 +6,30 @@ using System.Text.Json;
 using static TestSupport;
 using System.Diagnostics;
 
+if (args is ["--validate-release", var releaseArchive])
+{
+    var root = CreateTestRoot();
+    try
+    {
+        ZipFile.ExtractToDirectory(Path.GetFullPath(releaseArchive), root);
+        ReleaseValidator.Validate(root);
+        using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "lemonloader-release.json")));
+        if (manifest.RootElement.TryGetProperty("coreClrCryptoDexMode", out var mode) &&
+            mode.GetString() == "embedded" &&
+            Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .Any(path => Path.GetExtension(path).Equals(".dex", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new Exception("Embedded Loader release includes a standalone DEX build input.");
+        }
+        Console.WriteLine($"PASS: Release archive {Path.GetFullPath(releaseArchive)}");
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
+    return;
+}
+
 if (args is ["--hold-output", var readyFile])
 {
     File.WriteAllText(readyFile, Environment.ProcessId.ToString());
