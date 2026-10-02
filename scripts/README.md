@@ -8,6 +8,9 @@ caller-provided relative input paths use the current working directory.
 | test.ps1 | Run Core/CLI regression tests |
 | setup-dependencies.ps1 | Verify/select this product's pinned generator checkout without changing shared sources |
 | clean.ps1 | Clean known local build trees; releases/packages require AllOutputs |
+| scan-publication.ps1 | Audit product HEAD, explicit producing sources and final archives; no upload |
+| test-scripts.ps1 | Product script parsing and path/cleanup/publication helper fixtures |
+| test-publication-scan.ps1 | Scanner preflight fixtures; optional real Gitleaks history/archive tests |
 | publish.ps1 | Build CLI, GUI and pinned Interop tool into local per-RID outputs |
 | package-release.ps1 | Package published outputs and checksums, without uploading |
 | verify-apk-layout.ps1 | Validate an explicitly supplied APK layout |
@@ -22,9 +25,8 @@ must not depend on workspace helper files so this repository remains standalone.
 Signing and installation are not implicit steps of these scripts. Local
 `-AllowDirtySource` publishing is development-only. See [README](../README.md#build-local-packages)
 for commands and [Contributing](../CONTRIBUTING.md) for tag-driven publication.
-Script syntax/helper regression tests are also
-available from the containing workspace during tooling migration. Cleanup fixtures
-run as part of test.ps1 and do not require that workspace.
+Script syntax/helper and cleanup/publication fixtures run as part of test.ps1
+and do not require a containing workspace.
 
 Cleanup is restricted to this product. It preserves source caches, shared
 dependencies, diagnostic fixtures, private/unknown Output directories and
