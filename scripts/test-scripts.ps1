@@ -40,4 +40,5 @@ Assert-ChildPath -Path (Join-Path $link 'child') -Parent $link
 Assert-ChildPath -Path (Join-Path $link 'nested/child') -Parent (Join-Path $link 'nested')
 & (Join-Path $PSScriptRoot 'test-cleanup.ps1')
 & (Join-Path $PSScriptRoot 'test-publication-scan.ps1')
+& (Join-Path $PSScriptRoot 'test-release-packaging.ps1')
 Write-Host "Patcher script syntax and helpers passed ($count scripts; SkipBash=$SkipBash)."

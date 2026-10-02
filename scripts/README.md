@@ -11,6 +11,7 @@ caller-provided relative input paths use the current working directory.
 | scan-publication.ps1 | Audit product HEAD, explicit producing sources and final archives; no upload |
 | test-scripts.ps1 | Product script parsing and path/cleanup/publication helper fixtures |
 | test-publication-scan.ps1 | Scanner preflight fixtures; optional real Gitleaks history/archive tests |
+| test-release-packaging.ps1 | Synthetic cross-process Windows/Linux repacking, long filenames, modes and checksums |
 | publish.ps1 | Build CLI, GUI and pinned Interop tool into local per-RID outputs |
 | package-release.ps1 | Package published outputs and checksums, without uploading |
 | verify-apk-layout.ps1 | Validate an explicitly supplied APK layout |
@@ -27,6 +28,10 @@ Signing and installation are not implicit steps of these scripts. Local
 for commands and [Contributing](../CONTRIBUTING.md) for tag-driven publication.
 Script syntax/helper and cleanup/publication fixtures run as part of test.ps1
 and do not require a containing workspace.
+
+Linux archives use GNU tar headers with fixed times/ownership and executable
+CLI/GUI modes. Same-toolchain repacking of unchanged files is checked across
+processes; historical PAX archives remain ordinary readable tar.gz inputs.
 
 Cleanup is restricted to this product. It preserves source caches, shared
 dependencies, diagnostic fixtures, private/unknown Output directories and

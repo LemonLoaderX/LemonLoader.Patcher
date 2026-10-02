@@ -96,7 +96,7 @@ function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
         try {
             $writer = [System.Formats.Tar.TarWriter]::new(
                 $gzip,
-                [System.Formats.Tar.TarEntryFormat]::Pax,
+                [System.Formats.Tar.TarEntryFormat]::Gnu,
                 $true)
             try {
                 foreach ($path in Get-ChildItem -LiteralPath $SourceRoot -Recurse -File -Force |
@@ -106,7 +106,8 @@ function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
                     $relativePath = [IO.Path]::GetRelativePath(
                         $SourceRoot,
                         $path.FullName).Replace('\', '/')
-                    $entry = [System.Formats.Tar.PaxTarEntry]::new(
+                    # PAX's generated extended-header name includes the packaging PID.
+                    $entry = [System.Formats.Tar.GnuTarEntry]::new(
                         [System.Formats.Tar.TarEntryType]::RegularFile,
                         $relativePath)
                     $entry.Mode = if ($executables.Contains($relativePath)) {
@@ -116,6 +117,8 @@ function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
                         $regularMode
                     }
                     $entry.ModificationTime = $timestamp
+                    $entry.AccessTime = $timestamp
+                    $entry.ChangeTime = $timestamp
                     $entry.Uid = 0
                     $entry.Gid = 0
                     $entry.UserName = "root"
