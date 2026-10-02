@@ -36,3 +36,20 @@ validate fields they consume while tolerating additive metadata.
 Use scoped imperative commits and explain non-obvious ZIP, signing, rollback, or
 format decisions in the commit body. A format version changes only when an
 existing consumer cannot safely interpret the new semantics.
+
+## Cleanup
+
+Stop builds and close published Patcher processes first:
+
+```powershell
+pwsh -NoProfile -File scripts/clean.ps1 -WhatIf
+pwsh -NoProfile -File scripts/clean.ps1
+# Also remove known releases/packages:
+pwsh -NoProfile -File scripts/clean.ps1 -AllOutputs -WhatIf
+```
+
+Routine cleanup removes PublishTemp, src/tests bin/obj, generated ManagedCompat
+and TestResults. Releases and Packages require AllOutputs. Diagnostic fixtures,
+private/unknown Output directories, dependency caches and sibling repositories
+are preserved in both modes. Nested repositories are not traversed. Links on or
+inside a selected tree reject cleanup before deletion; there is no Deep mode.

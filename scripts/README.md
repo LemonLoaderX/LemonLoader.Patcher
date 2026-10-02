@@ -6,12 +6,14 @@ caller-provided relative input paths use the current working directory.
 | Entry point | Purpose |
 | --- | --- |
 | test.ps1 | Run Core/CLI regression tests |
+| setup-dependencies.ps1 | Verify/select this product's pinned generator checkout without changing shared sources |
+| clean.ps1 | Clean known local build trees; releases/packages require AllOutputs |
 | publish.ps1 | Build CLI, GUI and pinned Interop tool into local per-RID outputs |
 | package-release.ps1 | Package published outputs and checksums, without uploading |
 | verify-apk-layout.ps1 | Validate an explicitly supplied APK layout |
 | verify-unstripping.ps1 | Validate restored Unity managed references |
 
-All five workflows are retained. Publishing and packaging are distinct stages,
+Publishing and packaging are distinct stages,
 not duplicate release commands. `common/Paths.ps1` shares output containment and
 symlink/junction rejection below the trusted output root; aliases at or above
 that root are supported. It is not an executable entry point. Product scripts
@@ -21,4 +23,9 @@ Signing and installation are not implicit steps of these scripts. Local
 `-AllowDirtySource` publishing is development-only. See [README](../README.md#build-local-packages)
 for commands and [Contributing](../CONTRIBUTING.md) for tag-driven publication.
 Script syntax/helper regression tests are also
-available from the containing workspace's scripts/test-scripts.ps1.
+available from the containing workspace during tooling migration. Cleanup fixtures
+run as part of test.ps1 and do not require that workspace.
+
+Cleanup is restricted to this product. It preserves source caches, shared
+dependencies, diagnostic fixtures, private/unknown Output directories and
+published archives by default. See [maintenance commands](../CONTRIBUTING.md#cleanup).
