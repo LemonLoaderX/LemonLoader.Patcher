@@ -18,7 +18,7 @@ Use `--runtime android|bionic` or the GUI Runtime selector. Android is the defau
 download, and caches are isolated by variant. A local `--release` without
 `--runtime` selects that archive; when both are supplied their RIDs must match.
 Current Android/Bionic CoreCLR payloads carry
-`runtimeRid` in release, payload and runtime identity metadata. Bionic requires
+`runtimeRid` in release and payload metadata. Bionic requires
 its OpenSSL shim, private libraries and attribution instead of the JNI crypto
 DEX. This support does not qualify a development runtime for public release.
 
@@ -30,8 +30,8 @@ supported and their declared digest is still checked. Bionic does not use a DEX.
 
 Active Android source builds embed crypto helper DEX bytes in `libmain.so` and
 require API 26+. Releases explicitly declaring `coreClrCryptoDexMode: embedded`
-are patched without adding a `classesN.dex`; bootstrap identity is verified
-instead. Older Releases retain the promoted-DEX path. The new Loader needs a
+are patched without adding a `classesN.dex`; Release file validation protects
+the bootstrap. Older Releases retain the promoted-DEX path. The new Loader needs a
 rebuilt matching runtime with explicit helper-ClassLoader initialization.
 
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
@@ -204,11 +204,18 @@ Deployment/
 | `production` | `refresh` | `upgrade` | `seed` |
 | `locked` | `enforce` | `upgrade` | `seed` |
 
-- `seed` installs a missing file and otherwise preserves the destination.
+- `seed` installs a missing file on APK installation/update and otherwise preserves it.
 - `upgrade` replaces a file only when it still matches the last packaged copy.
-- `refresh` applies changed packaged bytes once per deployment revision, then
-  preserves later device-side edits until another revision is installed.
+- `refresh` applies packaged bytes once per APK update, then preserves device-side
+  edits until another APK update. Historical Loaders use deployment revision.
 - `enforce` restores the packaged bytes whenever the file is missing or differs.
+
+Current Loader skips seed/upgrade/refresh checks on unchanged-package launches;
+only enforce checks destination content each start. Layout 9 writes non-seed
+overrides without declared file sizes, hashes, profile labels or revision.
+Manually added files default to seed, and editing deployment needs no digest
+regeneration. See the Loader-owned
+[deployment contract](https://github.com/LemonLoaderX/LemonLoader/blob/main/docs/android/DEPLOYMENT.md).
 
 Exact rules take precedence over directory rules; longer matching directory
 rules take precedence over shorter ones. Examples:
@@ -350,13 +357,14 @@ uploaded.
 Binary releases are published at
 `https://github.com/LemonLoaderX/LemonLoader.Patcher/releases`.
 
-The current Release contract is asset layout v8 with
-`assets/LemonLoader/payload.json`. Runtime loader, dotnet, Interop, and packaged
-deployment content use independent hashes. Release and APK validation hash their
-complete contents; normal device startup trusts the installed domain marker and
-does not rescan the private runtime. Published payloads contain the minimal
-`runtime-identity.json`; full build provenance and build commands remain outside
-the Release. Validators require the fields they consume and tolerate additive
+Active Releases use asset layout 9 with minimal `assets/LemonLoader/payload.json`
+configuration: format version, runtime RID and optional non-seed path policies.
+They inject neither runtime identity JSON nor Interop generation manifests.
+Release/download validation still verifies individual files before injection.
+Native startup uses Android's APK update time for extraction caching, without
+installed-file scans. Older layout-8 Releases retain their original digest and
+external-DEX handling. Layout-9 Releases require a Patcher supporting layout 9;
+historical Patchers reject the new layout. Validators tolerate additive
 JSON metadata and files instead of maintaining content blacklists. Android
 staging, rather than Patcher, decides whether desktop-only material is published.
 Native entry replacement is limited to `libmain.so`;

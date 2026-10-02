@@ -152,9 +152,7 @@ try {
 
     foreach ($required in @(
         "lib/arm64-v8a/libmain.so",
-        "assets/LemonLoader/payload.json",
-        "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
-        "assets/LemonLoader/runtime/interop/interop-manifest.json")) {
+        "assets/LemonLoader/payload.json")) {
         if ($null -eq $archive.GetEntry($required)) {
             throw "APK is missing required LemonLoader entry '$required'."
         }
@@ -174,8 +172,93 @@ try {
     finally {
         $reader.Dispose()
     }
+    if ($payload.formatVersion -eq 9) {
+        if ($payload.runtimeRid -cnotin @('android-arm64', 'linux-bionic-arm64')) {
+            throw 'APK layout 9 has an unsupported runtime RID.'
+        }
+        if ($ExpectedManagedRuntimeBackend -and $ExpectedManagedRuntimeBackend -cne 'coreclr') {
+            throw 'APK layout 9 uses the CoreCLR backend.'
+        }
+        $engines = @($archive.Entries | Where-Object {
+            $_.FullName -cmatch '^assets/LemonLoader/runtime/dotnet/shared/Microsoft\.NETCore\.App/[^/]+/libcoreclr\.so$'
+        })
+        if ($engines.Count -ne 1) { throw 'APK must contain exactly one CoreCLR version directory.' }
+        $sharedRoot = $engines[0].FullName.Substring(0, $engines[0].FullName.LastIndexOf('/'))
+        $cryptoNames = if ($payload.runtimeRid -ceq 'android-arm64') {
+            @('libSystem.Security.Cryptography.Native.Android.so')
+        } else { @('libSystem.Security.Cryptography.Native.OpenSsl.so', 'libssl.so', 'libcrypto.so') }
+        foreach ($name in $cryptoNames) {
+            if ($null -eq $archive.GetEntry("$sharedRoot/$name")) { throw "APK runtime is missing '$name'." }
+        }
+        if ($payload.runtimeRid -ceq 'linux-bionic-arm64' -and
+            $null -ne $archive.GetEntry("$sharedRoot/libSystem.Security.Cryptography.Native.Android.so")) {
+            throw 'APK Bionic runtime contains the Android JNI crypto library.'
+        }
+        $unsupported = $archive.Entries | Where-Object {
+            $_.FullName.StartsWith('assets/LemonLoader/runtime/', [StringComparison]::Ordinal) -and
+            -not [string]::IsNullOrEmpty($_.Name) -and
+            -not ($_.FullName.StartsWith('assets/LemonLoader/runtime/loader/', [StringComparison]::Ordinal) -or
+                  $_.FullName.StartsWith('assets/LemonLoader/runtime/dotnet/', [StringComparison]::Ordinal) -or
+                  $_.FullName.StartsWith('assets/LemonLoader/runtime/interop/', [StringComparison]::Ordinal))
+        } | Select-Object -First 1
+        if ($unsupported) { throw "APK runtime entry '$($unsupported.FullName)' is outside a supported domain." }
+        $policyMap = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+        foreach ($file in @($payload.deploymentFiles)) {
+            if ($null -eq $file) { continue }
+            $path = [string]$file.path
+            Assert-SafeDeploymentPath -Path $path -Description 'APK deployment policy path'
+            $policy = if ($null -eq $file.policy) { 'seed' } else { [string]$file.policy }
+            if ($policy -cnotin @('seed', 'upgrade', 'refresh', 'enforce') -or $policyMap.ContainsKey($path)) {
+                throw "APK contains an invalid or duplicate deployment policy for '$path'."
+            }
+            $policyMap.Add($path, $policy)
+        }
+        $actualPaths = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+        foreach ($entry in $archive.Entries | Where-Object {
+            -not [string]::IsNullOrEmpty($_.Name) -and
+            $_.FullName.StartsWith('assets/LemonLoader/deployment/', [StringComparison]::Ordinal)
+        }) {
+            $path = $entry.FullName.Substring('assets/LemonLoader/deployment/'.Length)
+            Assert-SafeDeploymentPath -Path $path -Description 'APK deployment file path'
+            $actualPaths.Add($path, '')
+            $actualPolicy = if ($policyMap.ContainsKey($path)) { $policyMap[$path] } else { 'seed' }
+            $topLevel = $path.Split('/')[0]
+            $expectedPolicy = if ($expectedPolicies.ContainsKey($path)) { $expectedPolicies[$path] }
+                elseif ($ExpectedDeploymentProfile -and $topLevel -ceq 'UserData' -and $ExpectedDeploymentProfile -cne 'development') { 'upgrade' }
+                elseif ($ExpectedDeploymentProfile -ceq 'production' -and $topLevel -cin @('Mods', 'Plugins', 'UserLibs')) { 'refresh' }
+                elseif ($ExpectedDeploymentProfile -ceq 'locked' -and $topLevel -cin @('Mods', 'Plugins', 'UserLibs')) { 'enforce' }
+                elseif ($ExpectedDeploymentProfile) { 'seed' } else { $null }
+            if ($expectedPolicy -and $actualPolicy -cne $expectedPolicy) {
+                throw "APK deployment policy for '$path' is '$actualPolicy', expected '$expectedPolicy'."
+            }
+        }
+        foreach ($paths in @($policyMap, $actualPaths)) {
+            foreach ($path in $paths.Keys) {
+                for ($separator = $path.IndexOf('/'); $separator -ge 0; $separator = $path.IndexOf('/', $separator + 1)) {
+                    if ($paths.ContainsKey($path.Substring(0, $separator))) { throw "APK deployment path '$path' has a file/directory conflict." }
+                }
+            }
+        }
+        foreach ($path in @($expectedDeploymentFiles) + @($expectedPolicies.Keys)) {
+            if (!$actualPaths.ContainsKey($path)) { throw "Expected packaged deployment file '$path' was not found." }
+        }
+        $interopCount = @($archive.Entries | Where-Object {
+            $_.FullName.StartsWith('assets/LemonLoader/runtime/interop/', [StringComparison]::Ordinal) -and
+            $_.Name.EndsWith('.dll', [StringComparison]::OrdinalIgnoreCase)
+        }).Count
+        if ($interopCount -eq 0) { throw 'APK contains no generated Interop assemblies.' }
+        Write-Host 'Verified LemonLoader APK layout v9:'
+        Write-Host "  $apk"
+        Write-Host "  Interop assemblies: $interopCount"
+        Write-Host "  Deployment files: $($actualPaths.Count)"
+        return
+    }
     if ($payload.formatVersion -ne 8) {
         throw "APK payload.json has unsupported format '$($payload.formatVersion)'."
+    }
+    foreach ($required in @('assets/LemonLoader/runtime/dotnet/runtime-identity.json',
+                            'assets/LemonLoader/runtime/interop/interop-manifest.json')) {
+        if ($null -eq $archive.GetEntry($required)) { throw "APK is missing required LemonLoader entry '$required'." }
     }
     if ($payload.managedRuntimeBackend -notin @("monovm-sgen", "coreclr")) {
         throw "APK managed runtime backend '$($payload.managedRuntimeBackend)' is invalid."

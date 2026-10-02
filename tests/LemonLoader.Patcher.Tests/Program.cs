@@ -3,6 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using static TestSupport;
 using System.Diagnostics;
 
@@ -52,6 +53,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("Embedded Android crypto payload", () => TestEmbeddedCryptoAsync(apkVerificationScript)),
+    ("Minimal layout 9 payload", () => TestMinimalPayloadAsync(apkVerificationScript)),
     ("Runtime release selection and cache isolation", TestRuntimeSelectionAsync),
     ("APK payload layout", TestApkPayloadLayoutAsync),
     ("Directory payload injection", TestDirectoryPayloadInjectionAsync),
@@ -438,7 +440,7 @@ static Task TestReleaseValidationAsync()
             "assets/LemonLoader/payload.json",
             JsonSerializer.Serialize(new
             {
-                formatVersion = AndroidPayloadContract.FormatVersion,
+                formatVersion = AndroidPayloadContract.LegacyFormatVersion,
                 loaderSha256 = ComputePayloadDirectoryHash(root, "runtime/loader"),
                 dotnetSha256 = ComputePayloadDirectoryHash(root, "runtime/dotnet"),
                 interopSha256 = ComputePayloadDirectoryHash(root, "runtime/interop"),
@@ -454,7 +456,7 @@ static Task TestReleaseValidationAsync()
         var manifest = new Dictionary<string, object>
         {
             ["formatVersion"] = 2,
-            ["assetLayoutVersion"] = AndroidPayloadContract.FormatVersion,
+            ["assetLayoutVersion"] = AndroidPayloadContract.LegacyFormatVersion,
             ["configuration"] = "Release",
             ["gameAssembliesIncluded"] = false,
             ["managedRuntimeVersion"] = "10.0.10",
@@ -674,6 +676,107 @@ static async Task TestEmbeddedCryptoAsync(string? verificationScript)
     finally { Directory.Delete(root, true); }
 }
 
+static async Task TestMinimalPayloadAsync(string? verificationScript)
+{
+    var root = CreateTestRoot();
+    try
+    {
+        foreach (var rid in new[] { "android-arm64", "linux-bionic-arm64" })
+        {
+            var release = CreateMinimalReleaseFixture(root, rid);
+            ReleaseValidator.Validate(release);
+            var interop = CreateInteropTree(root);
+            File.Delete(Path.Combine(interop, InteropGenerationManifest.FileName));
+            var deployment = Path.Combine(root, "deployment-" + rid);
+            WritePayload(deployment, "Mods/Example.dll", "mod");
+            WritePayload(deployment, "Mods/Optional.dll", "optional");
+            WritePayload(deployment, "Mods/Required.dll", "required");
+            WritePayload(deployment, "UserData/config", "config");
+            WritePayload(deployment, "Future/file", "future");
+            var policies = DeploymentPolicyOptions.Create("production",
+                ["Mods/Optional.dll=seed", "Mods/Required.dll=enforce"]);
+            var apk = Path.Combine(root, rid + ".apk");
+            CreateZip(apk, new Dictionary<string, string> { ["classes.dex"] = "game", ["classes3.dex"] = "secondary" });
+            MergeApk(apk, release, interop, deployment, policies);
+            using (var archive = ZipFile.OpenRead(apk))
+            {
+                using var payload = JsonDocument.Parse(ReadZipEntry(archive, AndroidPayloadContract.PayloadManifestPath));
+                AssertEqual(9, payload.RootElement.GetProperty("formatVersion").GetInt32());
+                AssertEqual(rid, payload.RootElement.GetProperty("runtimeRid").GetString());
+                AssertEqual(3, payload.RootElement.EnumerateObject().Count());
+                var overrides = payload.RootElement.GetProperty("deploymentFiles").EnumerateArray()
+                    .ToDictionary(file => file.GetProperty("path").GetString()!, file => file.GetProperty("policy").GetString()!);
+                AssertEqual(3, overrides.Count);
+                AssertEqual("refresh", overrides["Mods/Example.dll"]);
+                AssertEqual("enforce", overrides["Mods/Required.dll"]);
+                AssertEqual("upgrade", overrides["UserData/config"]);
+                AssertEqual(2, archive.Entries.Count(entry => entry.FullName.EndsWith(".dex")));
+                AssertTrue(archive.GetEntry(AndroidPayloadContract.InteropRoot + "/interop-manifest.json") is null,
+                    "Layout 9 copied a generation manifest into the APK.");
+                AssertTrue(archive.GetEntry(AndroidPayloadContract.DotnetRoot + "/runtime-identity.json") is null,
+                    "Layout 9 requires a runtime identity JSON.");
+            }
+            if (verificationScript is not null)
+            {
+                await ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                    "-NoProfile", "-File", verificationScript, "-ApkPath", apk,
+                    "-ExpectedDeploymentProfile", "production", "-ExpectedDeploymentPolicy",
+                    "Mods/Optional.dll=seed,Mods/Required.dll=enforce");
+                using (var archive = ZipFile.Open(apk, ZipArchiveMode.Update))
+                {
+                    archive.GetEntry(AndroidPayloadContract.DeploymentRoot + "/Mods/Example.dll")!.Delete();
+                    WriteZipEntry(archive, AndroidPayloadContract.DeploymentRoot + "/Mods/Manual.dll", "manual add");
+                }
+                await ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                    "-NoProfile", "-File", verificationScript, "-ApkPath", apk,
+                    "-ExpectedDeployment", "Mods/Manual.dll", "-ExpectedDeploymentPolicy", "Mods/Manual.dll=seed");
+                using (var archive = ZipFile.Open(apk, ZipArchiveMode.Update))
+                {
+                    archive.GetEntry(AndroidPayloadContract.PayloadManifestPath)!.Delete();
+                    WriteZipEntry(archive, AndroidPayloadContract.PayloadManifestPath,
+                        JsonSerializer.Serialize(new { formatVersion = 9, runtimeRid = rid,
+                            deploymentFiles = new[] { new { path = "../escape", policy = "seed" } } }));
+                }
+                await AssertThrowsAsync<InvalidOperationException>(() => ProcessRunner.RunAsync("pwsh", null, CancellationToken.None,
+                    "-NoProfile", "-File", verificationScript, "-ApkPath", apk));
+            }
+            var game = Path.Combine(root, "directory-" + rid);
+            WritePayload(game, "lib/arm64-v8a/libmain.so", "game-main");
+            WritePayload(game, "lib/arm64-v8a/libunity.so", "game-unity");
+            InjectDirectory(game, release, interop, deployment, policies);
+            AssertTrue(File.Exists(Path.Combine(game, "assets/LemonLoader/runtime/interop/Game.dll")), "Plain Interop DLL injection failed.");
+            AssertEqual(0, Directory.GetFiles(game, "*.dex").Length);
+            var wrongApi = CreateMinimalReleaseFixture(root, rid, minimumApi: 25);
+            AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(wrongApi));
+            WritePayload(release, "lib/arm64-v8a/libmain.so", "corrupted-bootstrap");
+            AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(release));
+        }
+    }
+    finally { Directory.Delete(root, true); }
+}
+
+static string CreateMinimalReleaseFixture(string root, string rid, int minimumApi = 26)
+{
+    var release = CreateCoreClrReleaseFixture(root, includeAndroidCrypto: rid == "android-arm64",
+        includeCryptoDex: false, runtimeRid: rid, cryptoDexMode: rid == "android-arm64" ? "embedded" : null);
+    File.Delete(Path.Combine(release, "assets/LemonLoader/runtime/dotnet/runtime-identity.json"));
+    WritePayload(release, AndroidPayloadContract.PayloadManifestPath,
+        JsonSerializer.Serialize(new { formatVersion = 9, runtimeRid = rid }));
+    var manifestPath = Path.Combine(release, "lemonloader-release.json");
+    var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!;
+    manifest["assetLayoutVersion"] = 9;
+    manifest["minimumAndroidApi"] = minimumApi;
+    manifest["files"] = JsonSerializer.SerializeToNode(Directory.EnumerateFiles(release, "*", SearchOption.AllDirectories)
+        .Where(path => path != manifestPath).Select(path =>
+        {
+            using var input = File.OpenRead(path);
+            return new { path = Path.GetRelativePath(release, path).Replace('\\', '/'), size = input.Length,
+                sha256 = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant() };
+        }).ToArray());
+    File.WriteAllText(manifestPath, manifest.ToJsonString());
+    return release;
+}
+
 static string CreateCoreClrReleaseFixture(
     string root,
     bool includeAndroidCrypto = true,
@@ -806,7 +909,7 @@ static string CreateCoreClrReleaseFixture(
     }
     var payload = new Dictionary<string, object>
     {
-        ["formatVersion"] = AndroidPayloadContract.FormatVersion,
+        ["formatVersion"] = AndroidPayloadContract.LegacyFormatVersion,
         ["loaderSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/loader"),
         ["dotnetSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/dotnet"),
         ["interopSha256"] = ComputePayloadDirectoryHash(releaseRoot, "runtime/interop"),
@@ -833,7 +936,7 @@ static string CreateCoreClrReleaseFixture(
     var releaseManifest = new Dictionary<string, object>
     {
         ["formatVersion"] = 2,
-        ["assetLayoutVersion"] = AndroidPayloadContract.FormatVersion,
+        ["assetLayoutVersion"] = AndroidPayloadContract.LegacyFormatVersion,
         ["configuration"] = "Release",
         ["gameAssembliesIncluded"] = false,
         ["managedRuntimeVersion"] = runtimeVersion,

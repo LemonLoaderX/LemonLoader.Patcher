@@ -40,14 +40,13 @@ internal static class PayloadAssembler
                 dll,
                 $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}");
         }
-        var interopManifest = Path.Combine(
-            source.InteropRoot,
-            InteropGenerationManifest.FileName);
-        RequireFile(interopManifest, "Interop generation manifest");
-        AddFile(
-            archive,
-            interopManifest,
-            $"{AndroidPayloadContract.InteropRoot}/{InteropGenerationManifest.FileName}");
+        if (payload.FormatVersion == AndroidPayloadContract.LegacyFormatVersion)
+        {
+            var interopManifest = Path.Combine(source.InteropRoot, InteropGenerationManifest.FileName);
+            RequireFile(interopManifest, "Interop generation manifest");
+            AddFile(archive, interopManifest,
+                $"{AndroidPayloadContract.InteropRoot}/{InteropGenerationManifest.FileName}");
+        }
         if (source.DeploymentPath is not null)
             AddDeploymentRoot(archive, source.DeploymentPath);
         ValidateDeploymentEntries(archive);
@@ -205,6 +204,29 @@ internal static class PayloadAssembler
         DeploymentPolicyOptions deploymentPolicies,
         string? coreClrCryptoDexHash)
     {
+        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
+        {
+            const string prefix = AndroidPayloadContract.DeploymentRoot + "/";
+            var paths = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) &&
+                    entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
+                .Select(entry => entry.FullName[prefix.Length..]).Order(StringComparer.Ordinal).ToArray();
+            deploymentPolicies.ValidateRuleCoverage(paths);
+            var policies = paths.Select(path => new
+            {
+                path,
+                policy = DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path))
+            }).Where(file => file.policy != "seed").ToArray();
+            archive.GetEntry(PayloadEntry)?.Delete();
+            var entry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
+            using var configurationOutput = entry.Open();
+            JsonSerializer.Serialize(configurationOutput, new
+            {
+                formatVersion = AndroidPayloadContract.FormatVersion,
+                runtimeRid = descriptor.RuntimeRid,
+                deploymentFiles = policies
+            }, PayloadJsonOptions);
+            return;
+        }
         var deploymentFiles = BuildDeploymentFileDescriptors(archive, deploymentPolicies);
         deploymentPolicies.ValidateRuleCoverage(deploymentFiles.Select(file => file.Path));
         var updated = descriptor with
@@ -263,11 +285,17 @@ internal static class PayloadAssembler
             File.ReadAllText(path),
             PayloadJsonOptions) ?? throw new InvalidDataException(
                 "Android payload manifest is empty.");
-        if (descriptor.FormatVersion != AndroidPayloadContract.FormatVersion)
+        if (descriptor.FormatVersion is not (AndroidPayloadContract.FormatVersion or AndroidPayloadContract.LegacyFormatVersion))
         {
             throw new InvalidDataException(
                 $"Unsupported Android payload layout {descriptor.FormatVersion}; " +
-                $"expected {AndroidPayloadContract.FormatVersion}.");
+                $"expected {AndroidPayloadContract.LegacyFormatVersion} or {AndroidPayloadContract.FormatVersion}.");
+        }
+        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
+        {
+            if (descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
+                throw new InvalidDataException("Unsupported runtime RID.");
+            return descriptor with { PrivateNativeLibraries = [] };
         }
         if (descriptor.DeploymentFiles is null ||
             descriptor.DeploymentProfile is null ||
@@ -473,6 +501,9 @@ internal static class PayloadAssembler
         PayloadSource source,
         PayloadDescriptor descriptor)
     {
+        // Layout 9 releases are validated active CoreCLR inputs with no external DEX.
+        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
+            return null;
         var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
             descriptor.ManagedRuntimeBackend);
         var isBionic = descriptor.RuntimeRid == "linux-bionic-arm64" ||

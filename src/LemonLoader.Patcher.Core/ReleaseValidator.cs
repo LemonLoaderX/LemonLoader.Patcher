@@ -19,7 +19,8 @@ internal static class ReleaseValidator
         var manifest = document.RootElement;
         if (manifest.GetProperty("formatVersion").GetInt32() != 2)
             throw new InvalidDataException("Unsupported LemonLoader Release manifest format.");
-        if (manifest.GetProperty("assetLayoutVersion").GetInt32() != AssetLayoutVersion)
+        var layoutVersion = manifest.GetProperty("assetLayoutVersion").GetInt32();
+        if (layoutVersion is not (AssetLayoutVersion or AndroidPayloadContract.LegacyFormatVersion))
             throw new InvalidDataException("Unsupported LemonLoader Android asset layout.");
         if (manifest.GetProperty("gameAssembliesIncluded").GetBoolean())
             throw new InvalidDataException("The LemonLoader Release contains game-specific assemblies.");
@@ -72,7 +73,7 @@ internal static class ReleaseValidator
                 $"Unexpected: [{string.Join(", ", unexpected)}]; missing: [{string.Join(", ", missing)}].");
         }
 
-        ValidateAndroidLayout(root, actualFiles, manifest, verifiedFiles);
+        ValidateAndroidLayout(root, actualFiles, manifest, verifiedFiles, layoutVersion);
         return new ReleaseValidationResult(root, verifiedFiles);
     }
 
@@ -80,7 +81,8 @@ internal static class ReleaseValidator
         string root,
         IReadOnlySet<string> files,
         JsonElement releaseManifest,
-        IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles)
+        IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles,
+        int layoutVersion)
     {
         var runtimeVersion = releaseManifest.GetProperty("managedRuntimeVersion").GetString();
         var configuration = releaseManifest.GetProperty("configuration").GetString();
@@ -132,37 +134,40 @@ internal static class ReleaseValidator
 
         var runtimeIdentityPath =
             $"{AndroidPayloadContract.DotnetRoot}/runtime-identity.json";
-        if (!files.Contains(runtimeIdentityPath))
-            throw new InvalidDataException("The Release managed runtime identity file is missing.");
-        var runtimeIdentityFile = Path.Combine(
-            root,
-            runtimeIdentityPath.Replace('/', Path.DirectorySeparatorChar));
-        using (var runtimeIdentityDocument = JsonDocument.Parse(
-                   File.ReadAllText(runtimeIdentityFile)))
+        if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion)
         {
-            var identity = runtimeIdentityDocument.RootElement;
-            if (AndroidPayloadContract.ReadCryptoDexMode(identity) != cryptoDexMode)
-                throw new InvalidDataException("Runtime crypto DEX mode differs from the Release.");
-            if (releaseManifest.TryGetProperty("runtimeRid", out var identityRid))
+            if (!files.Contains(runtimeIdentityPath))
+                throw new InvalidDataException("The Release managed runtime identity file is missing.");
+            var runtimeIdentityFile = Path.Combine(
+                root,
+                runtimeIdentityPath.Replace('/', Path.DirectorySeparatorChar));
+            using (var runtimeIdentityDocument = JsonDocument.Parse(
+                       File.ReadAllText(runtimeIdentityFile)))
             {
-                var cryptoBackend = identityRid.GetString() == "linux-bionic-arm64" ? "openssl" : "android-jni";
-                if (!identity.TryGetProperty("runtimeRid", out var actualRid) ||
-                    actualRid.GetString() != identityRid.GetString() ||
-                    !identity.TryGetProperty("cryptoBackend", out var actualCrypto) || actualCrypto.GetString() != cryptoBackend)
-                    throw new InvalidDataException("Runtime RID/cryptography identity differs from the Release.");
-            }
-            if (identity.GetProperty("formatVersion").GetInt32() != 1 ||
-                identity.GetProperty("runtimeVersion").GetString() != runtimeVersion ||
-                identity.GetProperty("backend").GetString() != runtimeBackendName ||
-                identity.GetProperty("hostingModel").GetString() != runtimeHostingModel ||
-                identity.GetProperty("engineFile").GetString() != runtimeEngineFile ||
-                !string.Equals(
-                    identity.GetProperty("engineSha256").GetString(),
-                    runtimeEngineHash,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException(
-                    "The managed runtime identity file does not match the Release manifest.");
+                var identity = runtimeIdentityDocument.RootElement;
+                if (AndroidPayloadContract.ReadCryptoDexMode(identity) != cryptoDexMode)
+                    throw new InvalidDataException("Runtime crypto DEX mode differs from the Release.");
+                if (releaseManifest.TryGetProperty("runtimeRid", out var identityRid))
+                {
+                    var cryptoBackend = identityRid.GetString() == "linux-bionic-arm64" ? "openssl" : "android-jni";
+                    if (!identity.TryGetProperty("runtimeRid", out var actualRid) ||
+                        actualRid.GetString() != identityRid.GetString() ||
+                        !identity.TryGetProperty("cryptoBackend", out var actualCrypto) || actualCrypto.GetString() != cryptoBackend)
+                        throw new InvalidDataException("Runtime RID/cryptography identity differs from the Release.");
+                }
+                if (identity.GetProperty("formatVersion").GetInt32() != 1 ||
+                    identity.GetProperty("runtimeVersion").GetString() != runtimeVersion ||
+                    identity.GetProperty("backend").GetString() != runtimeBackendName ||
+                    identity.GetProperty("hostingModel").GetString() != runtimeHostingModel ||
+                    identity.GetProperty("engineFile").GetString() != runtimeEngineFile ||
+                    !string.Equals(
+                        identity.GetProperty("engineSha256").GetString(),
+                        runtimeEngineHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        "The managed runtime identity file does not match the Release manifest.");
+                }
             }
         }
 
@@ -184,111 +189,138 @@ internal static class ReleaseValidator
             root,
             PayloadManifestPath.Replace('/', Path.DirectorySeparatorChar))));
         var payload = payloadDocument.RootElement;
-        if (AndroidPayloadContract.ReadCryptoDexMode(payload) != cryptoDexMode)
+        if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion &&
+            AndroidPayloadContract.ReadCryptoDexMode(payload) != cryptoDexMode)
             throw new InvalidDataException("Payload crypto DEX mode differs from the Release.");
         if (cryptoDexMode == "embedded")
         {
             if (runtimeBackend != ManagedRuntimeBackend.CoreClr ||
                 !releaseManifest.TryGetProperty("runtimeRid", out var embeddedRid) || embeddedRid.GetString() != "android-arm64" ||
-                !releaseManifest.TryGetProperty("minimumAndroidApi", out var releaseApi) || releaseApi.ValueKind != JsonValueKind.Number || !releaseApi.TryGetInt32(out var minimumApi) || minimumApi < 26 ||
+                !releaseManifest.TryGetProperty("minimumAndroidApi", out var releaseApi) || releaseApi.ValueKind != JsonValueKind.Number || !releaseApi.TryGetInt32(out var minimumApi) || minimumApi < 26)
+                throw new InvalidDataException("Invalid embedded crypto identity or API level.");
+            if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion && (
                 !payload.TryGetProperty("minimumAndroidApi", out var payloadApi) || payloadApi.ValueKind != JsonValueKind.Number || !payloadApi.TryGetInt32(out var declaredApi) || declaredApi != minimumApi ||
                 !payload.TryGetProperty("coreClrCryptoBootstrapSha256", out var bootstrapHash) || bootstrapHash.ValueKind != JsonValueKind.String ||
-                bootstrapHash.GetString() != verifiedFiles[MainLibraryPath].Hash)
+                bootstrapHash.GetString() != verifiedFiles[MainLibraryPath].Hash))
                 throw new InvalidDataException("Invalid embedded crypto identity, API level or bootstrap hash.");
         }
-        else if (payload.TryGetProperty("coreClrCryptoBootstrapSha256", out var unexpectedBootstrap) && unexpectedBootstrap.ValueKind != JsonValueKind.Null)
+        else if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion &&
+                 payload.TryGetProperty("coreClrCryptoBootstrapSha256", out var unexpectedBootstrap) && unexpectedBootstrap.ValueKind != JsonValueKind.Null)
             throw new InvalidDataException("An external crypto payload declares embedded bootstrap metadata.");
-        if (payload.GetProperty("formatVersion").GetInt32() != AssetLayoutVersion)
+        if (payload.GetProperty("formatVersion").GetInt32() != layoutVersion)
             throw new InvalidDataException("The Android payload manifest has an unsupported format version.");
-        var payloadRuntimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
-            payload.GetProperty("managedRuntimeBackend").GetString());
-        var payloadRuntimeIdentityHash =
-            payload.GetProperty("managedRuntimeIdentitySha256").GetString();
-        {
-            var actualRuntimeIdentityHash = verifiedFiles[runtimeIdentityPath].Hash;
-            if (payloadRuntimeBackend != runtimeBackend ||
-                payloadRuntimeIdentityHash is null ||
-                payloadRuntimeIdentityHash.Length != 64 ||
-                payloadRuntimeIdentityHash.Any(character => !Uri.IsHexDigit(character)) ||
-                !string.Equals(
-                    payloadRuntimeIdentityHash,
-                    actualRuntimeIdentityHash,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidDataException(
-                    "The payload managed runtime identity does not match the Release file.");
-            }
-        }
-        var deploymentHash = payload.GetProperty("deploymentSha256").GetString();
-        var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, "deployment");
-        if (deploymentHash is null || deploymentHash.Length != 64 ||
-            deploymentHash.Any(character => !Uri.IsHexDigit(character)) ||
-            !string.Equals(deploymentHash, actualDeploymentHash, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException(
-                "The Android payload manifest hash for 'deployment' is invalid.");
-        }
-
         var invalidRuntimePath = files.FirstOrDefault(path =>
             path.StartsWith($"{AndroidPayloadContract.PayloadRoot}/runtime/", StringComparison.Ordinal) &&
             !AndroidPayloadContract.IsRuntimeDomainPath(path));
         if (invalidRuntimePath is not null)
             throw new InvalidDataException(
                 $"Android runtime file '{invalidRuntimePath}' is outside a supported update domain.");
-
-        foreach (var domain in new[]
-                 {
-                     (Property: "loaderSha256", Scope: "runtime/loader"),
-                     (Property: "dotnetSha256", Scope: "runtime/dotnet"),
-                     (Property: "interopSha256", Scope: "runtime/interop")
-                 })
+        if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion)
         {
-            var property = payload.GetProperty(domain.Property);
-            var hash = property.GetString();
-            var actualHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, domain.Scope);
-            if (hash is null || hash.Length != 64 ||
-                hash.Any(character => !Uri.IsHexDigit(character)) ||
-                !string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
+            var payloadRuntimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
+                payload.GetProperty("managedRuntimeBackend").GetString());
+            var payloadRuntimeIdentityHash =
+                payload.GetProperty("managedRuntimeIdentitySha256").GetString();
+            {
+                var actualRuntimeIdentityHash = verifiedFiles[runtimeIdentityPath].Hash;
+                if (payloadRuntimeBackend != runtimeBackend ||
+                    payloadRuntimeIdentityHash is null ||
+                    payloadRuntimeIdentityHash.Length != 64 ||
+                    payloadRuntimeIdentityHash.Any(character => !Uri.IsHexDigit(character)) ||
+                    !string.Equals(
+                        payloadRuntimeIdentityHash,
+                        actualRuntimeIdentityHash,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        "The payload managed runtime identity does not match the Release file.");
+                }
+            }
+            var deploymentHash = payload.GetProperty("deploymentSha256").GetString();
+            var actualDeploymentHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, "deployment");
+            if (deploymentHash is null || deploymentHash.Length != 64 ||
+                deploymentHash.Any(character => !Uri.IsHexDigit(character)) ||
+                !string.Equals(deploymentHash, actualDeploymentHash, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException(
-                    $"The Android payload manifest hash for '{domain.Scope}' is invalid.");
+                    "The Android payload manifest hash for 'deployment' is invalid.");
+            }
+
+            foreach (var domain in new[]
+                     {
+                         (Property: "loaderSha256", Scope: "runtime/loader"),
+                         (Property: "dotnetSha256", Scope: "runtime/dotnet"),
+                         (Property: "interopSha256", Scope: "runtime/interop")
+                     })
+            {
+                var property = payload.GetProperty(domain.Property);
+                var hash = property.GetString();
+                var actualHash = AndroidPayloadContract.ComputeTreeHash(verifiedFiles, domain.Scope);
+                if (hash is null || hash.Length != 64 ||
+                    hash.Any(character => !Uri.IsHexDigit(character)) ||
+                    !string.Equals(hash, actualHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException(
+                        $"The Android payload manifest hash for '{domain.Scope}' is invalid.");
+                }
+            }
+
+            if (payload.GetProperty("deploymentProfile").GetString() != "development" ||
+                payload.GetProperty("deploymentFiles").GetArrayLength() != 0)
+            {
+                throw new InvalidDataException(
+                    "A game-independent Release must use the development profile and contain no deployment files.");
+            }
+            var emptyDeploymentRevision = Convert.ToHexString(SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes("deployment-revision=1")))
+                .ToLowerInvariant();
+            if (payload.GetProperty("deploymentRevisionSha256").GetString() !=
+                emptyDeploymentRevision)
+            {
+                throw new InvalidDataException(
+                    "A game-independent Release has an invalid empty deployment revision.");
             }
         }
-
-        if (payload.GetProperty("deploymentProfile").GetString() != "development" ||
-            payload.GetProperty("deploymentFiles").GetArrayLength() != 0)
+        else
         {
-            throw new InvalidDataException(
-                "A game-independent Release must use the development profile and contain no deployment files.");
-        }
-        var emptyDeploymentRevision = Convert.ToHexString(SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes("deployment-revision=1")))
-            .ToLowerInvariant();
-        if (payload.GetProperty("deploymentRevisionSha256").GetString() !=
-            emptyDeploymentRevision)
-        {
-            throw new InvalidDataException(
-                "A game-independent Release has an invalid empty deployment revision.");
+            if (runtimeBackend != ManagedRuntimeBackend.CoreClr ||
+                !releaseManifest.TryGetProperty("runtimeRid", out var activeRid) ||
+                activeRid.GetString() is not ("android-arm64" or "linux-bionic-arm64") ||
+                !releaseManifest.TryGetProperty("minimumAndroidApi", out var activeApi) ||
+                activeApi.ValueKind != JsonValueKind.Number || !activeApi.TryGetInt32(out var api) || api < 26 ||
+                (activeRid.GetString() == "android-arm64" && cryptoDexMode != "embedded") ||
+                releaseManifest.TryGetProperty("experimentalRuntimeRid", out _))
+                throw new InvalidDataException("Layout 9 requires an active API26+ CoreCLR runtime profile.");
+            if (files.Any(path => path.StartsWith(AndroidPayloadContract.DeploymentRoot + "/", StringComparison.Ordinal) ||
+                                  path.StartsWith(AndroidPayloadContract.InteropRoot + "/", StringComparison.Ordinal)) ||
+                (payload.TryGetProperty("deploymentFiles", out var deploymentFiles) &&
+                 (deploymentFiles.ValueKind != JsonValueKind.Array || deploymentFiles.GetArrayLength() != 0)))
+                throw new InvalidDataException("A game-independent Release contains deployment or game Interop inputs.");
         }
 
-        var privateLibrariesProperty = payload.GetProperty("privateNativeLibraries");
-        if (privateLibrariesProperty.ValueKind != JsonValueKind.Array)
-            throw new InvalidDataException(
-                "The Android payload manifest private native library list is not an array.");
-        var privateLibraries = privateLibrariesProperty
-            .EnumerateArray()
-            .Select(value => value.GetString() ?? throw new InvalidDataException(
-                "The Android payload manifest contains a null private native library name."))
-            .ToHashSet(StringComparer.Ordinal);
+        var privateLibraries = new HashSet<string>(StringComparer.Ordinal);
+        if (layoutVersion == AndroidPayloadContract.LegacyFormatVersion)
+        {
+            var privateLibrariesProperty = payload.GetProperty("privateNativeLibraries");
+            if (privateLibrariesProperty.ValueKind != JsonValueKind.Array)
+                throw new InvalidDataException(
+                    "The Android payload manifest private native library list is not an array.");
+            privateLibraries = privateLibrariesProperty
+                .EnumerateArray()
+                .Select(value => value.GetString() ?? throw new InvalidDataException(
+                    "The Android payload manifest contains a null private native library name."))
+                .ToHashSet(StringComparer.Ordinal);
+        }
         var sharedRuntimeRoot =
             $"assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/{runtimeVersion}";
         var androidCryptoPath =
             $"{sharedRuntimeRoot}/libSystem.Security.Cryptography.Native.Android.so";
         var androidCryptoDexPath = AndroidPayloadContract.CoreClrCryptoDexReleasePath;
         var privateOpenSslRoot = "assets/LemonLoader/runtime/dotnet/native/openssl/";
-        var hasCoreClrCryptoDexHash = payload.TryGetProperty(
+        JsonElement coreClrCryptoDexHash = default;
+        var hasCoreClrCryptoDexHash = layoutVersion == AndroidPayloadContract.LegacyFormatVersion && payload.TryGetProperty(
             "coreClrCryptoDexSha256",
-            out var coreClrCryptoDexHash);
+            out coreClrCryptoDexHash);
         var hasNonNullCoreClrCryptoDexHash = hasCoreClrCryptoDexHash &&
             coreClrCryptoDexHash.ValueKind != JsonValueKind.Null;
         if (hasNonNullCoreClrCryptoDexHash &&

@@ -11,7 +11,8 @@ internal enum ManagedRuntimeBackend
 
 internal static class AndroidPayloadContract
 {
-    public const int FormatVersion = 8;
+    public const int FormatVersion = 9;
+    public const int LegacyFormatVersion = 8;
     public const string PayloadRoot = "assets/LemonLoader";
     public const string LoaderRoot = $"{PayloadRoot}/runtime/loader";
     public const string DotnetRoot = $"{PayloadRoot}/runtime/dotnet";
@@ -51,7 +52,7 @@ internal static class AndroidPayloadContract
         var scopePrefix = $"{PayloadRoot}/{scope}/";
         var lines = new List<string>
         {
-            $"layout-version={FormatVersion}",
+            $"layout-version={LegacyFormatVersion}",
             $"scope={scope}"
         };
         foreach (var entry in archive.Entries
@@ -89,7 +90,7 @@ internal static class AndroidPayloadContract
             : [];
         var lines = new List<string>
         {
-            $"layout-version={FormatVersion}",
+            $"layout-version={LegacyFormatVersion}",
             $"scope={scope}"
         };
         foreach (var path in files.OrderBy(
@@ -114,7 +115,7 @@ internal static class AndroidPayloadContract
         IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles, string scope)
     {
         var prefix = $"{PayloadRoot}/{scope}/";
-        var lines = new List<string> { $"layout-version={FormatVersion}", $"scope={scope}" };
+        var lines = new List<string> { $"layout-version={LegacyFormatVersion}", $"scope={scope}" };
         foreach (var file in verifiedFiles.Where(file => file.Key.StartsWith(prefix, StringComparison.Ordinal))
                      .OrderBy(file => file.Key, StringComparer.Ordinal))
             lines.Add($"{file.Key[(PayloadRoot.Length + 1)..]}|{file.Value.Size}|{file.Value.Hash}");

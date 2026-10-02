@@ -104,7 +104,7 @@ internal static class TestSupport
             "assets/LemonLoader/payload.json",
             JsonSerializer.Serialize(new Dictionary<string, object>
             {
-                ["formatVersion"] = AndroidPayloadContract.FormatVersion,
+                ["formatVersion"] = AndroidPayloadContract.LegacyFormatVersion,
                 ["loaderSha256"] = new string('0', 64),
                 ["dotnetSha256"] = new string('0', 64),
                 ["interopSha256"] = new string('0', 64),
@@ -157,7 +157,7 @@ internal static class TestSupport
     {
         var lines = new List<string>
         {
-            $"layout-version={AndroidPayloadContract.FormatVersion}",
+            $"layout-version={AndroidPayloadContract.LegacyFormatVersion}",
             $"scope={scope}"
         };
         foreach (var entry in archive.Entries
@@ -185,7 +185,7 @@ internal static class TestSupport
             : [];
         var lines = new List<string>
         {
-            $"layout-version={AndroidPayloadContract.FormatVersion}",
+            $"layout-version={AndroidPayloadContract.LegacyFormatVersion}",
             $"scope={scope}"
         };
         foreach (var path in files.OrderBy(
