@@ -22,17 +22,17 @@ Current Android/Bionic CoreCLR payloads carry
 its OpenSSL shim, private libraries and attribution instead of the JNI crypto
 DEX. This support does not qualify a development runtime for public release.
 
-Loader `v0.7.3-android.5` requires Patcher **1.1.0 or later**. Release inputs no
-longer repeat `coreClrCryptoDexSha256` in `payload.json`: `files[]` protects the
-fixed-path helper DEX. Patcher carries that verified digest into the final APK
-payload after promotion to `classesN.dex`. Older releases with the field remain
-supported and their declared digest is still checked. Bionic does not use a DEX.
-
 Active Android source builds embed crypto helper DEX bytes in `libmain.so` and
 require API 26+. Releases explicitly declaring `coreClrCryptoDexMode: embedded`
 are patched without adding a `classesN.dex`; Release file validation protects
 the bootstrap. Older Releases retain the promoted-DEX path. The new Loader needs a
 rebuilt matching runtime with explicit helper-ClassLoader initialization.
+
+For historical external-DEX Releases, including Loader v0.7.3-android.5 (Patcher
+1.1.0+), files[] protects the fixed-path helper DEX. Patcher promotes it to the
+next free classesN.dex and carries its verified digest into the legacy APK
+payload. Older declared coreClrCryptoDexSha256 fields remain checked. These
+compatibility steps do not apply to active embedded/layout-9 Releases.
 
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
@@ -127,8 +127,9 @@ CLI\LemonLoader.Patcher.CLI.exe patch UnpackedGame `
 ```
 
 Directory mode accepts raw `classes*.dex` files and apktool-decoded
-`smali`/`smali_classesN` source directories. CoreCLR adds its helper as the next
-unused DEX index without materializing synthetic source DEX files.
+`smali`/`smali_classesN` source directories. Historical external-DEX CoreCLR
+Releases add their helper as the next unused DEX index without materializing
+synthetic source DEX files. Active embedded Releases add no DEX or smali tree.
 
 Patch with Mods and persistent UserData using the `production` profile:
 
@@ -149,8 +150,9 @@ CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
     --policy "UserData/ExampleMod/defaults.cfg=upgrade"
 ```
 
-Offline patch with explicit Release, Unity references, and a published Interop
-directory:
+Patch with explicit Release and Unity references, and export generated Interop
+assemblies. Cpp2IL must already be cached for fully offline use; interop-output
+is an output directory, not an existing assembly input:
 
 ```powershell
 CLI\LemonLoader.Patcher.CLI.exe patch game.apk `
