@@ -45,7 +45,7 @@ $manifest.Save((Join-Path $product 'Directory.Build.props'))
 Assert-Equal $sibling (Get-InteropSourceRoot -RepositoryRoot $product)
 $invalid = Join-Path $product '.dependencies/invalid'
 Assert-Rejected { Initialize-InteropSourceCheckout -Path $invalid -Url $origin -Revision ('0' * 40) }
-if ((Test-Path -LiteralPath $invalid) -or @(Get-ChildItem -Path "$invalid.staging-*" -ErrorAction SilentlyContinue).Count) {
+if ((Test-Path -LiteralPath $invalid) -or @(Get-ChildItem -Path (Join-Path (Split-Path $invalid) '.staging-*') -ErrorAction SilentlyContinue).Count) {
     throw 'Failed setup published or left staging output.'
 }
 Write-Host 'PASS independent Patcher pins, matching/conflicting siblings, isolated caches, explicit roots and non-mutating setup'

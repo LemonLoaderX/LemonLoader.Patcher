@@ -46,7 +46,8 @@ function Initialize-InteropSourceCheckout {
     }
     $Path = [IO.Path]::GetFullPath($Path)
     [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path))
-    $staging = "$Path.staging-$([Guid]::NewGuid().ToString('N'))"
+    $stagingPrefix = Join-Path ([IO.Path]::GetDirectoryName($Path)) '.staging-'
+    $staging = "$stagingPrefix$([Guid]::NewGuid().ToString('N'))"
     try {
         $cloneArguments = @('--config', 'core.longpaths=true', '--no-checkout')
         if ($Url.StartsWith('https://', [StringComparison]::OrdinalIgnoreCase)) {
@@ -66,7 +67,7 @@ function Initialize-InteropSourceCheckout {
     }
     finally {
         if (Test-Path -LiteralPath $staging) {
-            if (![IO.Path]::GetFullPath($staging).StartsWith("$Path.staging-", [StringComparison]::Ordinal)) {
+            if (![IO.Path]::GetFullPath($staging).StartsWith([IO.Path]::GetFullPath($stagingPrefix), [StringComparison]::Ordinal)) {
                 throw 'Refusing to clean unexpected dependency staging.'
             }
             Remove-Item -LiteralPath $staging -Recurse -Force
