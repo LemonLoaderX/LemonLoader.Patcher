@@ -78,7 +78,7 @@ internal static class UnityVersionDetectionTests
                         InputPath = input,
                         OutputPath = input == apk ? Path.Combine(root, "output.apk") : null
                     }.NormalizeAndValidate();
-                    AssertEqual(expected, await new GameInteropGenerator(request, null).ExtractInputsAsync(work, default));
+                    AssertEqual(expected, await new GameInteropGenerator(request.Generation, null).ExtractInputsAsync(work, default));
                     AssertTrue(Directory.GetFiles(work).Select(Path.GetFileName).Order().SequenceEqual(
                         new[] { "global-metadata.dat", "libil2cpp.so" }),
                         "Version detection extracted game assets instead of reading their headers.");

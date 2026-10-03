@@ -27,7 +27,7 @@ internal static class PayloadAssembler
         AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets", cancellationToken);
         ValidateRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"), cancellationToken);
-        foreach (var dll in Directory.GetFiles(source.InteropRoot, "*.dll"))
+        foreach (var dll in InteropInput.Assemblies(source.InteropRoot))
         {
             AddFile(
                 archive,

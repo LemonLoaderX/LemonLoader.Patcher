@@ -25,6 +25,14 @@ primary DEX files to be present.
 ./LemonLoader.Patcher.CLI.exe patch UnpackedGame --release Loader.zip
 ```
 
+Use generate-interop to export DLLs without modifying a game, inject --interop
+to use existing DLLs without generation, or process-apk to align/sign only.
+patch --interop also skips generation. Injection needs no Patcher Interop manifest;
+DLLs must match the exact game. Generation-only accepts APK/directory or explicit
+binary + metadata + Unity version, without requiring the libmain startup layout.
+See [stage commands and script replacements](WORKFLOW.md). GUI's Tasks operation
+selector exposes these workflows and hides unrelated inputs.
+
 Patcher does not bundle a Loader archive. An omitted --release resolves the
 selected latest Loader distribution. Fully offline work requires a local Release,
 Unity references and the verified Cpp2IL tool already cached or explicitly supplied.
@@ -91,7 +99,7 @@ Maintain the existing application/signing identity for replacement updates.
 Progress/tool output goes to stderr as plain text, with terminal control sequences
 removed. GUI display, copying and saving use the same plain tool output.
 Successful APK patch writes output, sha256
-and unity-version lines to stdout. Directory mode reports its modified input path
+and, when generation ran, unity-version lines to stdout. Directory mode reports its modified input path
 and omits sha256. Exit codes: 0 success, 1 execution failure, 2 invalid usage,
 130 cancellation. --verbose adds exception details.
 

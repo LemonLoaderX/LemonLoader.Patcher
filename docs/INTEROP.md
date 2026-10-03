@@ -13,14 +13,15 @@ There is no whole-file version-string scan or libunity.so scan. Modified/strippe
 headers and unknown formats require --unity-version (Unity version in GUI).
 
 ```powershell
-./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
-    --release Loader.zip --unity-version 6000.3.8f1 `
-    --unity-libraries UnityDependencies --interop-output GeneratedInterop
+./LemonLoader.Patcher.CLI.exe generate-interop game.apk --output GeneratedInterop `
+    --unity-version 6000.3.8f1 --unity-libraries UnityDependencies
 ./LemonLoader.Patcher.CLI.exe unity-dependencies 6000.3.8f1 --output UnityDependencies
 ```
 
 Interop output is a published copy of newly generated DLLs and the host-side
-interop-manifest.json; it is not an existing assembly input. Replacement occurs
+interop-manifest.json. inject --interop or patch --interop consumes an existing
+DLL directory without this manifest, version detection or generation tools.
+It cannot be combined with generation overrides or --interop-output. Replacement occurs
 only after successful generation. The manifest records source/tool/CLI/dependency
 identity for diagnosis and Mod development; it is not injected into layout 9.
 The entire export directory is replaced. It must not overlap game, deployment,
@@ -42,6 +43,10 @@ lemonloader-unity-dependencies.json. unity-dependencies accepts --cache; its def
 is `.tools/UnityDependencies` beside the Patcher executable, shared with patching.
 Local references and cached/explicit
 Cpp2IL are necessary for offline generation.
+Custom generators must produce valid DLLs; Patcher no longer repairs generated
+metadata. Generation records and their file hashes are produced only for explicit
+exports. [Workflow](WORKFLOW.md) covers generation without a Loader and direct
+binary/metadata inputs.
 
 Loader owns [runtime ABI and standalone generation](https://github.com/LemonLoaderX/LemonLoader/blob/main/docs/android/INTEROP.md).
 Patcher and Loader can pin different Interop source revisions; do not switch a

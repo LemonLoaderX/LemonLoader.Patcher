@@ -4,7 +4,10 @@ Status: implemented
 
 The Interop-cache decision below is superseded by
 [Patcher-owned downloads without Interop caching](2026-10-03-patcher-owned-downloads.md).
-Independent archives, generator normalization and bounded GUI logs remain current.
+Independent archives and bounded GUI logs remain current.
+Custom-generator normalization is superseded by
+[composable file workflows](2026-10-04-composable-file-workflows.md); no generated
+DLL post-processing remains in Patcher.
 
 ## Problem
 

@@ -27,48 +27,44 @@ public sealed class ApkPatchPipeline
             }).NormalizeAndValidate();
             Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath!)!);
         }
+        ValidateGameLayout();
 
-        var workRoot = Path.Combine(
-            Path.GetTempPath(),
-            $"lemonloader-patcher-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(workRoot);
-        try
+        using var workspace = new PatchWorkspace(progress);
+        var workRoot = workspace.Root;
+        var release = await ResolveReleaseAsync(workRoot, cancellationToken);
+        string interopRoot;
+        string? unityVersion = null;
+        if (request.InteropInputPath is { } existing)
         {
-            var release = await ResolveReleaseAsync(workRoot, cancellationToken);
-            var generatedInterop = await new GameInteropGenerator(request, progress)
+            ReportStage("Using supplied Interop DLLs");
+            interopRoot = Path.Combine(workRoot, "interop");
+            InteropInput.Copy(existing, interopRoot, cancellationToken);
+        }
+        else
+        {
+            var generated = await new GameInteropGenerator(request.Generation.NormalizeAndValidate(), progress)
                 .GenerateAsync(workRoot, cancellationToken);
-            var payload = new PayloadSource(
-                release.ReleaseRoot,
-                generatedInterop.DirectoryPath,
-                request.DeploymentPath,
-                request.DeploymentPolicies);
-
-            if (request.InputKind == PatchInputKind.Directory)
-            {
-                ReportStage("Injecting payload into directory");
-                PayloadAssembler.InjectDirectory(request.InputPath, payload, progress, cancellationToken);
-                ReportStage("Directory ready");
-                return new(request.InputPath, null, generatedInterop.UnityVersion, true);
-            }
-
-            ReportStage("Packaging APK payload");
-            var patchedApk = Path.Combine(workRoot, "patched.apk");
-            DirectoryPublisher.CopyFile(request.InputPath, patchedApk, cancellationToken);
-            PayloadAssembler.MergeApk(patchedApk, payload, cancellationToken);
-            var hash = await ApkPostProcessor.PublishAsync(
-                patchedApk,
-                request.OutputPath!,
-                workRoot,
-                postProcessing!,
-                progress,
-                cancellationToken);
-            ReportStage("APK ready");
-            return new(request.OutputPath!, hash, generatedInterop.UnityVersion, false);
+            interopRoot = generated.DirectoryPath;
+            unityVersion = generated.UnityVersion;
         }
-        finally
+        var payload = new PayloadSource(release.ReleaseRoot, interopRoot, request.DeploymentPath, request.DeploymentPolicies);
+
+        if (request.InputKind == PatchInputKind.Directory)
         {
-            TryDeleteWorkRoot(workRoot);
+            ReportStage("Injecting payload into directory");
+            PayloadAssembler.InjectDirectory(request.InputPath, payload, progress, cancellationToken);
+            ReportStage("Directory ready");
+            return new(request.InputPath, null, unityVersion, true);
         }
+
+        ReportStage("Packaging APK payload");
+        var patchedApk = Path.Combine(workRoot, "patched.apk");
+        DirectoryPublisher.CopyFile(request.InputPath, patchedApk, cancellationToken);
+        PayloadAssembler.MergeApk(patchedApk, payload, cancellationToken);
+        var hash = await ApkPostProcessor.PublishAsync(patchedApk, request.OutputPath!, workRoot,
+            postProcessing!, progress, cancellationToken);
+        ReportStage("APK ready");
+        return new(request.OutputPath!, hash, unityVersion, false);
     }
 
     private async Task<ReleaseValidationResult> ResolveReleaseAsync(
@@ -102,19 +98,23 @@ public sealed class ApkPatchPipeline
         return validation;
     }
 
-    private void TryDeleteWorkRoot(string workRoot)
+    private void ValidateGameLayout()
     {
-        try
+        bool hasMain, hasUnity;
+        if (request.InputKind == PatchInputKind.Directory)
         {
-            if (Directory.Exists(workRoot))
-                Directory.Delete(workRoot, true);
+            hasMain = File.Exists(GamePackageLayout.FilePath(request.InputPath, GamePackageLayout.MainLibrary));
+            hasUnity = File.Exists(GamePackageLayout.FilePath(request.InputPath, GamePackageLayout.UnityLibrary));
         }
-        catch (Exception exception)
+        else
         {
-            progress?.Report(new(
-                PatcherMessageKind.Warning,
-                $"Could not remove temporary directory '{workRoot}': {exception.Message}"));
+            using var apk = ZipFile.OpenRead(request.InputPath);
+            ArchiveSafety.Validate(apk);
+            hasMain = apk.GetEntry(GamePackageLayout.MainLibrary) is not null;
+            hasUnity = apk.GetEntry(GamePackageLayout.UnityLibrary) is not null;
         }
+        if (!hasMain || !hasUnity)
+            throw new InvalidOperationException("Injection requires the standard ARM64 Unity libmain.so startup layout.");
     }
 
     private void ReportStage(string message) =>

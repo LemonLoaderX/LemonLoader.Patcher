@@ -1,10 +1,9 @@
 using System.IO.Compression;
-using Mono.Cecil;
 
 internal sealed record GeneratedInterop(string DirectoryPath, string UnityVersion);
 
 internal sealed class GameInteropGenerator(
-    PatchRequest request,
+    InteropRequest request,
     IProgress<PatcherMessage>? progress)
 {
     public async Task<GeneratedInterop> GenerateAsync(
@@ -19,8 +18,8 @@ internal sealed class GameInteropGenerator(
         ReportStage($"Generating Interop assemblies for Unity {unityVersion}");
         var outputRoot = Path.Combine(workRoot, "interop");
         await GenerateAssembliesAsync(inputRoot, outputRoot, unityVersion, cancellationToken);
-        if (request.InteropOutputPath is not null)
-            DirectoryPublisher.Replace(outputRoot, request.InteropOutputPath, progress, cancellationToken);
+        if (request.OutputPath is not null)
+            DirectoryPublisher.Replace(outputRoot, request.OutputPath, progress, cancellationToken);
         return new(outputRoot, unityVersion);
     }
 
@@ -46,16 +45,14 @@ internal sealed class GameInteropGenerator(
         string outputRoot,
         CancellationToken cancellationToken)
     {
+        if (request.InputPath is null)
+        {
+            DirectoryPublisher.CopyFile(request.GameAssemblyPath!, Path.Combine(outputRoot, "libil2cpp.so"), cancellationToken);
+            DirectoryPublisher.CopyFile(request.MetadataPath!, Path.Combine(outputRoot, "global-metadata.dat"), cancellationToken);
+            return request.UnityVersion!;
+        }
         if (request.InputKind == PatchInputKind.Directory)
         {
-            ValidateUnityLayout(
-                File.Exists(GamePackageLayout.FilePath(
-                    request.InputPath,
-                    GamePackageLayout.MainLibrary)),
-                File.Exists(GamePackageLayout.FilePath(
-                    request.InputPath,
-                    GamePackageLayout.UnityLibrary)),
-                "input directory");
             var unityVersion = UnityVersionDetector.FromDirectory(
                 request.InputPath, request.UnityVersion, cancellationToken);
             CopyDirectoryInput(
@@ -74,10 +71,6 @@ internal sealed class GameInteropGenerator(
 
         using var apk = ZipFile.OpenRead(request.InputPath);
         ArchiveSafety.Validate(apk);
-        ValidateUnityLayout(
-            apk.GetEntry(GamePackageLayout.MainLibrary) is not null,
-            apk.GetEntry(GamePackageLayout.UnityLibrary) is not null,
-            "APK");
         var apkUnityVersion = UnityVersionDetector.FromApk(apk, request.UnityVersion, cancellationToken);
         await CopyApkInputAsync(
             apk,
@@ -101,11 +94,12 @@ internal sealed class GameInteropGenerator(
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(outputRoot);
+        var recordIdentity = request.OutputPath is not null;
         var interopTool = request.Il2CppInteropCliPath is null
-            ? InteropGeneratorTool.FromBundledFork(BundledInteropGeneratorTool.FindToolDll())
-            : InteropGeneratorTool.FromOverride(request.Il2CppInteropCliPath);
+            ? InteropGeneratorTool.FromBundledFork(BundledInteropGeneratorTool.FindToolDll(), recordIdentity)
+            : InteropGeneratorTool.FromOverride(request.Il2CppInteropCliPath, recordIdentity);
         var cpp2Il = request.Cpp2IlPath ?? await Cpp2IlResolver.ResolveAsync(
-            request.ToolCacheRoot,
+            ToolCachePaths.Root,
             progress,
             cancellationToken);
         var unityDependencies = request.UnityLibrariesPath is null
@@ -139,27 +133,16 @@ internal sealed class GameInteropGenerator(
                 dummyRoot,
                 outputRoot,
                 unityDependencies.DirectoryPath));
-        // The pinned fork fixes orphan HasDefault flags while generating methods.
-        // Explicit older/custom generators still need the compatibility pass.
-        if (request.Il2CppInteropCliPath is not null)
-            NormalizeAssemblies(outputRoot);
-        InteropGenerationManifest.Write(
-            outputRoot,
-            inputRoot,
-            unityVersion,
-            unityDependencies,
-            cpp2Il,
-            Cpp2IlResolver.Version,
-            interopTool);
-    }
-
-    private static void ValidateUnityLayout(bool hasMain, bool hasUnity, string description)
-    {
-        if (!hasMain || !hasUnity)
-        {
-            throw new InvalidOperationException(
-                $"The {description} does not use the standard ARM64 Unity libmain.so startup layout.");
-        }
+        _ = InteropInput.Assemblies(outputRoot);
+        if (recordIdentity)
+            InteropGenerationManifest.Write(
+                outputRoot,
+                inputRoot,
+                unityVersion,
+                unityDependencies,
+                cpp2Il,
+                Cpp2IlResolver.Version,
+                interopTool);
     }
 
     private static void CopyDirectoryInput(
@@ -200,45 +183,6 @@ internal sealed class GameInteropGenerator(
         await using var input = entry.Open();
         await using var output = File.Create(destination);
         await input.CopyToAsync(output, cancellationToken);
-    }
-
-    private static void NormalizeAssemblies(string directoryPath)
-    {
-        foreach (var path in Directory.GetFiles(directoryPath, "*.dll"))
-        {
-            var temporaryPath = path + ".patched";
-            var changed = false;
-            using (var resolver = new DefaultAssemblyResolver())
-            {
-                resolver.AddSearchDirectory(directoryPath);
-                using var assembly = AssemblyDefinition.ReadAssembly(path, new ReaderParameters
-                {
-                    AssemblyResolver = resolver,
-                    InMemory = true,
-                    ReadingMode = ReadingMode.Immediate
-                });
-                foreach (var type in assembly.MainModule.Types.SelectMany(EnumerateTypes))
-                    foreach (var method in type.Methods)
-                        foreach (var parameter in method.Parameters)
-                        {
-                            if (!parameter.HasDefault || parameter.HasConstant)
-                                continue;
-                            parameter.Attributes &= ~Mono.Cecil.ParameterAttributes.HasDefault;
-                            changed = true;
-                        }
-                if (changed)
-                    assembly.Write(temporaryPath);
-            }
-            if (changed)
-                File.Move(temporaryPath, path, true);
-        }
-    }
-
-    private static IEnumerable<TypeDefinition> EnumerateTypes(TypeDefinition type)
-    {
-        yield return type;
-        foreach (var nested in type.NestedTypes.SelectMany(EnumerateTypes))
-            yield return nested;
     }
 
     private static void RequireFile(string path, string description)

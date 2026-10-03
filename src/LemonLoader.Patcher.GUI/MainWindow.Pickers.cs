@@ -115,6 +115,7 @@ public sealed partial class MainWindow
         nameof(GameAssemblyPath) => "Choose libil2cpp.so",
         nameof(MetadataPath) => "Choose global-metadata.dat",
         nameof(InteropOutputPath) => "Choose Interop output directory",
+        nameof(InteropInputPath) => "Choose existing Interop DLL directory",
         nameof(Cpp2IlPath) => "Choose Cpp2IL executable",
         nameof(Il2CppInteropCliPath) => "Choose Il2CppInterop CLI assembly",
         nameof(ZipAlignPath) => "Choose zipalign executable",

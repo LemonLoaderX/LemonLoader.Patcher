@@ -81,10 +81,13 @@ are accepted. This uses production validation without games, signing or installa
 | Responsibility | Core module |
 | --- | --- |
 | One patch run/temporary workspace | ApkPatchPipeline |
-| Game inputs and generated Interop | GameInteropGenerator |
+| Independent generation request/export | InteropRequest, InteropPipeline |
+| Game inputs and generator invocation | GameInteropGenerator |
+| Existing DLL inputs | InteropInput |
 | APK/directory payload | PayloadAssembler |
 | Transactional directory replacement | DirectoryInjector |
 | Explicit alignment/signing | ApkPostProcessor |
+| Independent APK processing | ApkProcessingPipeline |
 | External execution | ProcessRunner and resolvers |
 
 External-tool deadlines cover exit and stdout/stderr draining. Cancellation kills

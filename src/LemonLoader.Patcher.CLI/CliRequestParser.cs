@@ -5,10 +5,10 @@ internal static class CliRequestParser
         "--output", "--release", "--runtime", "--deployment", "--profile", "--policy",
         "--game-assembly", "--metadata", "--unity-version", "--unity-libraries",
         "--interop-output", "--cpp2il", "--il2cppinterop-cli", "--zipalign",
-        "--keystore", "--key-alias", "--apksigner"
+        "--keystore", "--key-alias", "--apksigner", "--interop"
     ];
 
-    public static PatchRequest ParsePatchRequest(string[] args)
+    public static PatchRequest ParsePatchRequest(string[] args, bool injectionOnly = false)
     {
         if (args.Length == 0 || args[0].StartsWith('-'))
         {
@@ -18,7 +18,9 @@ internal static class CliRequestParser
         }
         var parsed = CliOptions.Parse(
             args[1..],
-            PatchValueOptions,
+            injectionOnly ? PatchValueOptions.Where(option => option is not
+                ("--game-assembly" or "--metadata" or "--unity-version" or "--unity-libraries" or
+                 "--interop-output" or "--cpp2il" or "--il2cppinterop-cli")).ToArray() : PatchValueOptions,
             ["--policy"],
             ["--align"]);
         try
@@ -38,6 +40,7 @@ internal static class CliRequestParser
                 UnityVersion = parsed.Optional("--unity-version"),
                 UnityLibrariesPath = parsed.Optional("--unity-libraries"),
                 InteropOutputPath = parsed.Optional("--interop-output"),
+                InteropInputPath = injectionOnly ? parsed.Required("--interop") : parsed.Optional("--interop"),
                 Cpp2IlPath = parsed.Optional("--cpp2il"),
                 Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli"),
                 AlignApk = parsed.Has("--align"),
@@ -46,10 +49,49 @@ internal static class CliRequestParser
                 Signing = ParseSigning(parsed)
             }.NormalizeAndValidate();
         }
-        catch (ArgumentException exception)
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
         {
             throw new CliUsageException(exception.Message, exception);
         }
+    }
+
+    public static InteropRequest ParseInteropRequest(string[] args)
+    {
+        var hasInput = args.Length > 0 && !args[0].StartsWith('-');
+        var parsed = CliOptions.Parse(hasInput ? args[1..] : args,
+            ["--output", "--game-assembly", "--metadata", "--unity-version", "--unity-libraries", "--cpp2il", "--il2cppinterop-cli"]);
+        try
+        {
+            return new InteropRequest
+            {
+                InputPath = hasInput ? args[0] : null, OutputPath = parsed.Required("--output"),
+                GameAssemblyPath = parsed.Optional("--game-assembly"), MetadataPath = parsed.Optional("--metadata"),
+                UnityVersion = parsed.Optional("--unity-version"), UnityLibrariesPath = parsed.Optional("--unity-libraries"),
+                Cpp2IlPath = parsed.Optional("--cpp2il"), Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli")
+            }.NormalizeAndValidate();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
+        { throw new CliUsageException(exception.Message, exception); }
+    }
+
+    public static ApkProcessingRequest ParseProcessingRequest(string[] args)
+    {
+        if (args.Length == 0 || args[0].StartsWith('-'))
+            throw new CliUsageException("Missing input APK. Run 'LemonLoader.Patcher.CLI process-apk --help'.");
+        var parsed = CliOptions.Parse(args[1..],
+            ["--output", "--zipalign", "--keystore", "--key-alias", "--apksigner"], switches: ["--align"]);
+        try
+        {
+            var request = new ApkProcessingRequest
+            {
+                InputPath = args[0], OutputPath = parsed.Required("--output"),
+                AlignApk = parsed.Has("--align"), ZipAlignPath = parsed.Optional("--zipalign"),
+                ApkSignerPath = parsed.Optional("--apksigner"), Signing = ParseSigning(parsed)
+            };
+            _ = new ApkProcessingPipeline(request);
+            return request;
+        }
+        catch (ArgumentException exception) { throw new CliUsageException(exception.Message, exception); }
     }
 
     public static UnityDependenciesRequest ParseUnityDependenciesRequest(string[] args)

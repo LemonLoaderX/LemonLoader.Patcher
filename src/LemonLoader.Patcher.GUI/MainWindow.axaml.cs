@@ -30,11 +30,11 @@ public sealed partial class MainWindow : Window
         logTimer.Start();
         WorkspaceTabs.SelectionChanged += (_, _) =>
         {
-            RunButton.Content = WorkspaceTabs.SelectedIndex == 0
-                ? "Patch"
-                : "Restore dependencies";
+            UpdateTaskMode();
             ValidationText.Text = string.Empty;
         };
+        OperationMode.SelectionChanged += (_, _) => UpdateTaskMode();
+        UpdateTaskMode();
     }
 
     protected override void OnClosed(EventArgs eventArgs)
@@ -50,11 +50,18 @@ public sealed partial class MainWindow : Window
             return;
 
         ApkPatchPipeline? pipeline = null;
+        InteropPipeline? interop = null;
+        ApkProcessingPipeline? processing = null;
         UnityDependenciesRequest? dependencies = null;
         try
         {
-            if (WorkspaceTabs.SelectedIndex == 0)
-                pipeline = new ApkPatchPipeline(BuildPatchRequest(), new QueueProgress(pendingMessages));
+            var taskProgress = new QueueProgress(pendingMessages);
+            if (WorkspaceTabs.SelectedIndex == 0 && OperationMode.SelectedIndex == 1)
+                interop = new InteropPipeline(BuildInteropRequest(), taskProgress);
+            else if (WorkspaceTabs.SelectedIndex == 0 && OperationMode.SelectedIndex == 3)
+                processing = new ApkProcessingPipeline(BuildProcessingRequest(), taskProgress);
+            else if (WorkspaceTabs.SelectedIndex == 0)
+                pipeline = new ApkPatchPipeline(BuildPatchRequest(), taskProgress);
             else
                 dependencies = BuildDependenciesRequest();
         }
@@ -72,7 +79,22 @@ public sealed partial class MainWindow : Window
         var progress = new QueueProgress(pendingMessages);
         try
         {
-            if (WorkspaceTabs.SelectedIndex == 0)
+            if (interop is not null)
+            {
+                var result = await Task.Run(() => interop.RunAsync(operationCancellation.Token), operationCancellation.Token);
+                DrainProgress();
+                StatusText.Text = $"Generated {result.AssemblyCount} Interop assemblies";
+                SetResult(result.OutputPath);
+                AppendLog("result", result.OutputPath);
+                AppendLog("unity", result.UnityVersion);
+                RefreshLog();
+            }
+            else if (processing is not null)
+            {
+                var result = await Task.Run(() => processing.RunAsync(operationCancellation.Token), operationCancellation.Token);
+                ShowPackageResult(result);
+            }
+            else if (pipeline is not null)
                 await RunPatchAsync(pipeline!, operationCancellation.Token);
             else
                 await RestoreDependenciesAsync(dependencies!, progress, operationCancellation.Token);
@@ -81,7 +103,7 @@ public sealed partial class MainWindow : Window
         {
             DrainProgress();
             StatusText.Text = "Cancelled";
-            AppendLog("cancelled", "The patch was not committed. A requested Interop export may already be available.");
+            AppendLog("cancelled", "Task cancelled. A separately committed Interop export may already be available.");
             RefreshLog();
         }
         catch (ArgumentException exception)
@@ -109,6 +131,11 @@ public sealed partial class MainWindow : Window
         CancellationToken cancellationToken)
     {
         var result = await Task.Run(() => pipeline.RunAsync(cancellationToken), cancellationToken);
+        ShowPackageResult(result);
+    }
+
+    private void ShowPackageResult(PatchResult result)
+    {
         DrainProgress();
         StatusText.Text = result.ModifiedInPlace ? "Directory ready" : "APK ready";
         SetResult(result.OutputPath);
@@ -150,9 +177,7 @@ public sealed partial class MainWindow : Window
         OperationProgress.IsVisible = running;
         if (running)
         {
-            StatusText.Text = WorkspaceTabs.SelectedIndex == 0
-                ? "Preparing patch"
-                : "Preparing Unity dependency restore";
+            StatusText.Text = "Preparing task";
         }
     }
 

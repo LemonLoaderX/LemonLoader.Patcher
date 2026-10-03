@@ -43,5 +43,20 @@ foreach (var size in new[] { new Size(1120,780), new Size(900,640) })
             throw new Exception("Command outside window: " + name);
     }
 }
+var mode = window.FindControl<ComboBox>("OperationMode")!;
+mode.SelectedIndex = 1;
+Dispatcher.UIThread.RunJobs();
+if (window.FindControl<TextBox>("ReleasePath")!.IsVisible || window.FindControl<TextBox>("OutputApkPath")!.IsVisible ||
+    !window.FindControl<TextBox>("InteropOutputPath")!.IsVisible || window.FindControl<Button>("RunButton")!.Content?.ToString() != "Generate Interop")
+    throw new Exception("Generation mode exposes injection-only fields.");
+mode.SelectedIndex = 2;
+Dispatcher.UIThread.RunJobs();
+if (!window.FindControl<Grid>("ExistingInteropRow")!.IsVisible || window.FindControl<Expander>("InteropSection")!.IsVisible)
+    throw new Exception("Injection mode exposes generator options.");
+mode.SelectedIndex = 3;
+Dispatcher.UIThread.RunJobs();
+if (window.FindControl<TextBox>("ReleasePath")!.IsVisible || window.FindControl<Grid>("ExistingInteropRow")!.IsVisible ||
+    window.FindControl<Expander>("InteropSection")!.IsVisible || !window.FindControl<Expander>("PostProcessingSection")!.IsVisible)
+    throw new Exception("APK processing mode exposes generation/injection inputs.");
 window.Close();
 Console.WriteLine("PASS GUI suggested/custom paths, bounded log, validation preserves evidence, command layout.");

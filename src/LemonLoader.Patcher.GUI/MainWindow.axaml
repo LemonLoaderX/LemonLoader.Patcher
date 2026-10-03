@@ -22,12 +22,21 @@
 
     <Grid Grid.Row="1" ColumnDefinitions="3*,2*" ColumnSpacing="0">
       <TabControl x:Name="WorkspaceTabs" Margin="20,16,12,16">
-        <TabItem Header="Patch">
+        <TabItem Header="Tasks">
           <ScrollViewer Margin="0,14,8,0"
                         HorizontalScrollBarVisibility="Disabled"
                         VerticalScrollBarVisibility="Auto"
                         AllowAutoHide="False">
             <StackPanel Margin="0,0,8,0" Spacing="18">
+              <Grid ColumnDefinitions="132,*" ColumnSpacing="8">
+                <TextBlock Text="Operation" Classes="field-label" />
+                <ComboBox x:Name="OperationMode" Grid.Column="1" SelectedIndex="0">
+                  <ComboBoxItem Content="Generate and inject" />
+                  <ComboBoxItem Content="Generate Interop DLLs" />
+                  <ComboBoxItem Content="Inject existing Interop" />
+                  <ComboBoxItem Content="Align / sign APK" />
+                </ComboBox>
+              </Grid>
               <StackPanel Spacing="10">
                 <TextBlock Text="Package" Classes="section-title" />
                 <Grid ColumnDefinitions="132,*,36,36" RowDefinitions="Auto,Auto,Auto,Auto"
@@ -46,11 +55,11 @@
                           AutomationProperties.Name="Choose unpacked input directory"
                           ToolTip.Tip="Choose unpacked input directory" />
 
-                  <TextBlock Grid.Row="1" Text="LemonLoader Release" Classes="field-label" />
+                  <TextBlock x:Name="ReleaseLabel" Grid.Row="1" Text="LemonLoader Release" Classes="field-label" />
                   <TextBox x:Name="ReleasePath" Grid.Row="1" Grid.Column="1"
                            Classes="single-line"
                            Watermark="Local archive or selected runtime download" />
-                  <Button Grid.Row="1" Grid.Column="2" Content="⋯" Classes="browse"
+                  <Button x:Name="ReleaseBrowseButton" Grid.Row="1" Grid.Column="2" Content="⋯" Classes="browse"
                           Tag="ReleasePath" Click="BrowseFileClick"
                           AutomationProperties.Name="Choose LemonLoader Release"
                           ToolTip.Tip="Choose LemonLoader Release" />
@@ -63,7 +72,7 @@
                           Click="BrowseOutputApkClick"
                           AutomationProperties.Name="Choose output APK"
                           ToolTip.Tip="Choose output APK" />
-                  <TextBlock Grid.Row="3" Text="Runtime" Classes="field-label" />
+                  <TextBlock x:Name="RuntimeLabel" Grid.Row="3" Text="Runtime" Classes="field-label" />
                   <ComboBox x:Name="RuntimeVariant" Grid.Row="3" Grid.Column="1" SelectedIndex="0">
                     <ComboBoxItem Content="Android ARM64 (default)" Tag="android" />
                     <ComboBoxItem Content="Linux Bionic ARM64" Tag="bionic" />
@@ -71,9 +80,22 @@
                 </Grid>
               </StackPanel>
 
+              <Grid x:Name="ExistingInteropRow" ColumnDefinitions="132,*,36" ColumnSpacing="8" IsVisible="False">
+                <TextBlock Text="Interop DLLs" Classes="field-label" />
+                <TextBox x:Name="InteropInputPath" Grid.Column="1" Classes="single-line" />
+                <Button Grid.Column="2" Content="⋯" Classes="browse" Tag="InteropInputPath" Click="BrowseFolderClick"
+                        ToolTip.Tip="Choose existing Interop DLL directory" AutomationProperties.Name="Choose existing Interop DLL directory" />
+              </Grid>
+              <Grid x:Name="InteropExportRow" ColumnDefinitions="132,*,36" ColumnSpacing="8">
+                <TextBlock Text="Interop output" Classes="field-label" />
+                <TextBox x:Name="InteropOutputPath" Grid.Column="1" Classes="single-line" Watermark="Optional export directory" />
+                <Button Grid.Column="2" Content="⋯" Classes="browse" Tag="InteropOutputPath" Click="BrowseFolderClick"
+                        ToolTip.Tip="Choose Interop output directory" AutomationProperties.Name="Choose Interop output directory" />
+              </Grid>
+
               <Border BorderBrush="#D9DEE2" BorderThickness="0,1,0,0" />
 
-              <StackPanel Spacing="10">
+              <StackPanel x:Name="DeploymentSection" Spacing="10">
                 <TextBlock Text="Packaged files" Classes="section-title" />
                 <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
                       ColumnSpacing="8" RowSpacing="8">
@@ -101,7 +123,7 @@
                 </Grid>
               </StackPanel>
 
-              <Expander Header="Interop overrides" Classes="advanced"
+              <Expander x:Name="InteropSection" Header="Interop inputs" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
                 <Grid Margin="16,12,16,16" ColumnDefinitions="*,*"
                       RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
@@ -148,18 +170,6 @@
                   </StackPanel>
 
                   <StackPanel Grid.Row="2" Spacing="4">
-                    <TextBlock Text="Interop output" Classes="advanced-field-label" />
-                    <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
-                      <TextBox x:Name="InteropOutputPath" Classes="single-line"
-                               Watermark="Optional reference directory" />
-                      <Button Grid.Column="1" Content="⋯" Classes="browse"
-                              Tag="InteropOutputPath" Click="BrowseFolderClick"
-                              AutomationProperties.Name="Choose Interop output directory"
-                              ToolTip.Tip="Choose Interop output directory" />
-                    </Grid>
-                  </StackPanel>
-
-                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
                     <TextBlock Text="Cpp2IL" Classes="advanced-field-label" />
                     <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
                       <TextBox x:Name="Cpp2IlPath" Classes="single-line"
@@ -171,7 +181,7 @@
                     </Grid>
                   </StackPanel>
 
-                  <StackPanel Grid.Row="3" Grid.ColumnSpan="2" Spacing="4">
+                  <StackPanel Grid.Row="2" Grid.Column="1" Spacing="4">
                     <TextBlock Text="Il2CppInterop CLI" Classes="advanced-field-label" />
                     <Grid ColumnDefinitions="*,36" ColumnSpacing="8">
                       <TextBox x:Name="Il2CppInteropCliPath" Classes="single-line"
@@ -250,8 +260,6 @@
           <StackPanel Margin="0,18,8,0" Spacing="18">
             <StackPanel Spacing="4">
               <TextBlock Text="Restore Unity references" Classes="section-title" />
-              <TextBlock Text="Create the managed reference set used by both Interop generation and Mod projects."
-                         Classes="supporting" TextWrapping="Wrap" />
             </StackPanel>
             <Grid ColumnDefinitions="132,*,36" RowDefinitions="Auto,Auto,Auto"
                   ColumnSpacing="8" RowSpacing="8">

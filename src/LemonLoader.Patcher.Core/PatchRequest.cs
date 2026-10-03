@@ -24,6 +24,7 @@ public sealed record PatchRequest
     public string? UnityVersion { get; init; }
     public string? UnityLibrariesPath { get; init; }
     public string? InteropOutputPath { get; init; }
+    public string? InteropInputPath { get; init; }
     public string? Cpp2IlPath { get; init; }
     public string? Il2CppInteropCliPath { get; init; }
     public bool AlignApk { get; init; }
@@ -33,6 +34,14 @@ public sealed record PatchRequest
     internal PatchInputKind InputKind { get; init; }
 
     internal string ToolCacheRoot => ToolCachePaths.Root;
+
+    internal InteropRequest Generation => new()
+    {
+        InputPath = InputPath, OutputPath = InteropOutputPath,
+        GameAssemblyPath = GameAssemblyPath, MetadataPath = MetadataPath, UnityVersion = UnityVersion,
+        UnityLibrariesPath = UnityLibrariesPath, Cpp2IlPath = Cpp2IlPath, Il2CppInteropCliPath = Il2CppInteropCliPath,
+        InputKind = InputKind
+    };
 
     internal ApkPostProcessingOptions PostProcessing => new(
         AlignApk,
@@ -63,6 +72,7 @@ public sealed record PatchRequest
             MetadataPath = OptionalPath(MetadataPath),
             UnityLibrariesPath = OptionalPath(UnityLibrariesPath),
             InteropOutputPath = OptionalPath(InteropOutputPath),
+            InteropInputPath = OptionalPath(InteropInputPath),
             Cpp2IlPath = OptionalPath(Cpp2IlPath),
             Il2CppInteropCliPath = OptionalPath(Il2CppInteropCliPath),
             ZipAlignPath = OptionalPath(ZipAlignPath),
@@ -112,6 +122,19 @@ public sealed record PatchRequest
             throw new DirectoryNotFoundException(
                 $"Deployment directory was not found at '{normalized.DeploymentPath}'.");
         }
+        if (normalized.InteropInputPath is { } interop)
+        {
+            _ = InteropInput.Assemblies(interop);
+            if (normalized.InteropOutputPath is not null || normalized.GameAssemblyPath is not null ||
+                normalized.MetadataPath is not null || normalized.UnityVersion is not null ||
+                normalized.UnityLibrariesPath is not null || normalized.Cpp2IlPath is not null ||
+                normalized.Il2CppInteropCliPath is not null)
+                throw new ArgumentException("Existing --interop DLLs cannot be combined with generation/export options.");
+            if (normalized.OutputPath is { } output && PathSafety.Contains(interop, output))
+                throw new ArgumentException("Output APK must not overwrite an Interop input.");
+        }
+        if (normalized.InteropInputPath is null && !string.IsNullOrWhiteSpace(normalized.UnityVersion))
+            UnityDependenciesResolver.NormalizeVersion(normalized.UnityVersion);
         if (normalized.Il2CppInteropCliPath is { } interopCliPath)
         {
             if (!File.Exists(interopCliPath))
@@ -133,21 +156,12 @@ public sealed record PatchRequest
         }
         if (normalized.InteropOutputPath is { } export)
         {
-            PathSafety.RejectLinks(export);
-            var inputs = new[]
-            {
+            RequestPaths.ValidateExport(export,
                 normalized.InputPath, normalized.ReleasePath, normalized.DeploymentPath,
                 normalized.GameAssemblyPath, normalized.MetadataPath, normalized.UnityLibrariesPath,
                 normalized.Cpp2IlPath, normalized.Il2CppInteropCliPath,
                 normalized.ZipAlignPath, normalized.ApkSignerPath,
-                normalized.Signing?.KeystorePath, normalized.OutputPath, normalized.ToolCacheRoot
-            };
-            foreach (var input in inputs.OfType<string>())
-            {
-                if (PathSafety.Contains(export, input) ||
-                    ((input == normalized.ToolCacheRoot || Directory.Exists(input)) && PathSafety.Contains(input, export)))
-                    throw new ArgumentException("Interop output must not overlap game, dependency, deployment or other input/output paths.");
-            }
+                normalized.Signing?.KeystorePath, normalized.OutputPath, normalized.ToolCacheRoot);
         }
         if (inputIsDirectory) PathSafety.RejectLinks(normalized.InputPath);
         return normalized;
@@ -157,7 +171,7 @@ public sealed record PatchRequest
 public sealed record PatchResult(
     string OutputPath,
     string? Sha256,
-    string UnityVersion,
+    string? UnityVersion,
     bool ModifiedInPlace);
 
 public enum PatcherMessageKind

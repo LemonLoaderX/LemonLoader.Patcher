@@ -35,6 +35,10 @@ public static class CliApplication
             {
                 "patch" => await RunPatchAsync(
                     effectiveArgs[1..], output, progress, cancellationToken),
+                "inject" => await RunPatchAsync(
+                    effectiveArgs[1..], output, progress, cancellationToken, injectionOnly: true),
+                "generate-interop" => await RunInteropAsync(effectiveArgs[1..], output, progress, cancellationToken),
+                "process-apk" => await RunProcessingAsync(effectiveArgs[1..], output, progress, cancellationToken),
                 "unity-dependencies" => await RunUnityDependenciesAsync(
                     effectiveArgs[1..], output, progress, cancellationToken),
                 _ => throw new CliUsageException(
@@ -65,21 +69,44 @@ public static class CliApplication
         string[] args,
         TextWriter output,
         IProgress<PatcherMessage> progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool injectionOnly = false)
     {
         if (IsHelpRequest(args))
         {
-            await output.WriteLineAsync(PatchHelp);
+            await output.WriteLineAsync(injectionOnly ? InjectHelp : PatchHelp);
             return Success;
         }
         var result = await new ApkPatchPipeline(
-                CliRequestParser.ParsePatchRequest(args),
+                CliRequestParser.ParsePatchRequest(args, injectionOnly),
                 progress)
             .RunAsync(cancellationToken);
         await output.WriteLineAsync($"output: {result.OutputPath}");
         if (result.Sha256 is not null)
             await output.WriteLineAsync($"sha256: {result.Sha256}");
+        if (result.UnityVersion is not null)
+            await output.WriteLineAsync($"unity-version: {result.UnityVersion}");
+        return Success;
+    }
+
+    private static async Task<int> RunInteropAsync(string[] args, TextWriter output,
+        IProgress<PatcherMessage> progress, CancellationToken cancellationToken)
+    {
+        if (IsHelpRequest(args)) { await output.WriteLineAsync(InteropHelp); return Success; }
+        var result = await new InteropPipeline(CliRequestParser.ParseInteropRequest(args), progress).RunAsync(cancellationToken);
+        await output.WriteLineAsync($"output: {result.OutputPath}");
         await output.WriteLineAsync($"unity-version: {result.UnityVersion}");
+        await output.WriteLineAsync($"assemblies: {result.AssemblyCount}");
+        return Success;
+    }
+
+    private static async Task<int> RunProcessingAsync(string[] args, TextWriter output,
+        IProgress<PatcherMessage> progress, CancellationToken cancellationToken)
+    {
+        if (IsHelpRequest(args)) { await output.WriteLineAsync(ProcessingHelp); return Success; }
+        var result = await new ApkProcessingPipeline(CliRequestParser.ParseProcessingRequest(args), progress).RunAsync(cancellationToken);
+        await output.WriteLineAsync($"output: {result.OutputPath}");
+        await output.WriteLineAsync($"sha256: {result.Sha256}");
         return Success;
     }
 
@@ -131,6 +158,9 @@ public static class CliApplication
 
         Commands:
           patch                 Inject LemonLoader into an Android IL2CPP APK or directory
+          generate-interop      Generate Interop DLLs without injecting a Loader
+          inject                Inject using existing Interop DLLs; no generation tools needed
+          process-apk           Align/sign an APK without generation or injection
           unity-dependencies    Restore Unity managed reference assemblies
 
         Global options:
@@ -159,6 +189,7 @@ public static class CliApplication
                                           UserLibs, UserData, or future top-level folders
           --profile <name>                development (default), production, or locked
           --policy <path=policy>          Deployment policy override; repeatable
+          --interop <directory>           Existing generated DLLs; skip generation (no manifest needed)
 
         Optional Interop overrides:
           --game-assembly <path>          libil2cpp.so override
@@ -197,8 +228,57 @@ public static class CliApplication
           --output <directory>            Published Unity managed reference directory
 
         Optional:
-          --cache <directory>             Download cache; defaults beside the output
+          --cache <directory>             Download cache; defaults beside the Patcher executable
           --verbose                       Include exception details on failure
+        """;
+
+    private const string InteropHelp = """
+        Generate game Interop DLLs independently of Loader injection.
+
+        Usage:
+          LemonLoader.Patcher.CLI generate-interop <game.apk|directory> --output <directory> [options]
+          LemonLoader.Patcher.CLI generate-interop --game-assembly <libil2cpp.so>
+              --metadata <global-metadata.dat> --unity-version <version> --output <directory> [options]
+
+        Options:
+          --game-assembly <path>          Override native binary
+          --metadata <path>               Override metadata
+          --unity-version <version>       Override detected Unity version; required without game input
+          --unity-libraries <directory>   Existing Unity reference assemblies
+          --cpp2il <path>                 Existing Cpp2IL executable
+          --il2cppinterop-cli <path>      Custom generator DLL with adjacent dependencies
+
+        No Loader Release, native startup layout, deployment or Android SDK is required.
+        Output replacement is transactional. Custom generators must produce valid DLLs;
+        Patcher does not rewrite generated assemblies. There is no persistent Interop cache.
+        """;
+
+    private const string InjectHelp = """
+        Inject a Loader using existing Interop DLLs, without generation or version detection.
+
+        Usage:
+          LemonLoader.Patcher.CLI inject <game.apk> --output <output.apk> --interop <directory>
+              [--release <Loader.zip>] [--runtime <android|bionic>] [options]
+          LemonLoader.Patcher.CLI inject <game-directory> --interop <directory> [options]
+
+        --interop is required. DLLs must match the exact game's binary/metadata.
+        No Patcher Interop manifest or generation tools are required.
+        Payload and post-processing options match patch: --deployment, --profile,
+        --policy, --align, --zipalign, --keystore, --key-alias, --apksigner.
+        Generation/export options are rejected. Existing patched inputs are rejected.
+        """;
+
+    private const string ProcessingHelp = """
+        Align and/or sign an APK independently of Loader injection.
+
+        Usage:
+          LemonLoader.Patcher.CLI process-apk <input.apk> --output <output.apk>
+              [--align] [--zipalign <path>] [--keystore <path> --key-alias <alias>]
+              [--apksigner <path>]
+
+        At least one operation is required. Alignment precedes signing and both results
+        are verified. Signing password environment variables are the same as patch.
+        Input/output must differ; failures preserve the previous output.
         """;
 }
 

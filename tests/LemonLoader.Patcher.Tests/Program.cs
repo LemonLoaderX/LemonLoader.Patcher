@@ -59,6 +59,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Publication safety, cancellation and cache repair", PublicationTests.RunAsync),
     ("Unity version normalization", TestUnityVersionNormalizationAsync),
     ("Structured Unity version detection", UnityVersionDetectionTests.RunAsync),
+    ("Composable generation and injection workflows", WorkflowTests.RunAsync),
     ("Unity dependency cache repair", TestUnityDependencyCacheRepairAsync),
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
@@ -256,6 +257,9 @@ static Task TestInteropGeneratorOverrideAsync()
         });
         File.WriteAllText(provenancePath, provenance);
         var tool = InteropGeneratorTool.FromOverride(toolPath);
+        var transientTool = InteropGeneratorTool.FromOverride(toolPath, recordIdentity: false);
+        AssertEqual(string.Empty, transientTool.Sha256);
+        AssertEqual(string.Empty, transientTool.ContentSha256);
         AssertEqual(Path.GetFullPath(toolPath), tool.Path);
         AssertEqual("override", tool.Source);
         AssertTrue(!string.IsNullOrWhiteSpace(tool.Version), "The override tool version was not detected.");

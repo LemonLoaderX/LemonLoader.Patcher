@@ -10,10 +10,10 @@ internal sealed record InteropGeneratorTool(
     string Sha256,
     string ContentSha256)
 {
-    public static InteropGeneratorTool FromOverride(string path) =>
-        Describe(path, "override");
+    public static InteropGeneratorTool FromOverride(string path, bool recordIdentity = true) =>
+        Describe(path, "override", recordIdentity);
 
-    public static InteropGeneratorTool FromBundledFork(string path)
+    public static InteropGeneratorTool FromBundledFork(string path, bool recordIdentity = true)
     {
         var fullPath = System.IO.Path.GetFullPath(path);
         var provenancePath = System.IO.Path.Combine(
@@ -46,12 +46,13 @@ internal sealed record InteropGeneratorTool(
                 exception);
         }
 
-        return Describe(fullPath, "bundled-fork");
+        return Describe(fullPath, "bundled-fork", recordIdentity);
     }
 
     private static InteropGeneratorTool Describe(
         string path,
-        string source)
+        string source,
+        bool recordIdentity)
     {
         var fullPath = System.IO.Path.GetFullPath(path);
         if (!File.Exists(fullPath))
@@ -75,8 +76,8 @@ internal sealed record InteropGeneratorTool(
         if (string.IsNullOrWhiteSpace(version))
             throw new InvalidDataException($"The Il2CppInterop CLI '{fullPath}' has no assembly version.");
 
-        var hash = HashFile(fullPath);
-        var contentHash = ComputeContentHash(System.IO.Path.GetDirectoryName(fullPath)!);
+        var hash = recordIdentity ? HashFile(fullPath) : string.Empty;
+        var contentHash = recordIdentity ? ComputeContentHash(System.IO.Path.GetDirectoryName(fullPath)!) : string.Empty;
         return new(fullPath, version, source, hash, contentHash);
     }
 
