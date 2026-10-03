@@ -10,12 +10,16 @@ caller-provided relative input paths use the current working directory.
 | clean.ps1 | Clean known local build trees; releases/packages require AllOutputs |
 | scan-publication.ps1 | Audit product HEAD, explicit producing sources and final archives; no upload |
 | test-scripts.ps1 | Product script parsing and path/cleanup/publication helper fixtures |
+| test-cleanup.ps1 | Synthetic named-output cleanup and link/source protection |
+| test-dependencies.ps1 | Independent generator pins and non-mutating source setup |
 | test-publication-scan.ps1 | Scanner preflight fixtures; optional real Gitleaks history/archive tests |
 | test-release-packaging.ps1 | Synthetic cross-process Windows/Linux repacking, long filenames, modes and checksums |
 | publish.ps1 | Build CLI, GUI and pinned Interop tool into local per-RID outputs |
 | package-release.ps1 | Package published outputs and checksums, without uploading |
 | verify-apk-layout.ps1 | Validate an explicitly supplied APK layout |
 | verify-unstripping.ps1 | Validate restored Unity managed references |
+| generate-release-notes.sh | CI/local release-note producer |
+| test-release-notes.sh | Release-note baseline, filtering and fallback regression |
 
 Publishing and packaging are distinct stages,
 not duplicate release commands. `common/Paths.ps1` shares output containment and
@@ -24,7 +28,7 @@ that root are supported. It is not an executable entry point. Product scripts
 must not depend on workspace helper files so this repository remains standalone.
 
 Signing and installation are not implicit steps of these scripts. Local
-`-AllowDirtySource` publishing is development-only. See [README](../README.md#build-local-packages)
+`-AllowDirtySource` publishing is development-only. See [local packages](../CONTRIBUTING.md#local-packages-and-source-ownership)
 for commands and [Contributing](../CONTRIBUTING.md) for tag-driven publication.
 Script syntax/helper and cleanup/publication fixtures run as part of test.ps1
 and do not require a containing workspace.

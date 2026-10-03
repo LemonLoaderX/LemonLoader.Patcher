@@ -11,6 +11,10 @@ Use PowerShell 7 and a stable .NET 10 SDK. The product's global.json selects the
 latest installed .NET 10 feature band, matching CI's 10.0.x policy rather than
 inheriting an SDK choice from a parent checkout.
 
+See [usage](docs/USAGE.md) and [Interop](docs/INTEROP.md) for user contracts.
+Nontrivial decisions belong in .agents/notes by topic; preserve alternatives and
+supersession links, and remove fully absorbed duplicate drafts.
+
 See [automatic release notes](docs/releases/README.md) for commit conventions,
 baseline selection, optional additions, and local/CI preview commands.
 
@@ -25,8 +29,7 @@ require rebuilding or moving an existing tag.
 
 ```powershell
 pwsh -NoProfile -File scripts/test.ps1
-pwsh -NoProfile -File scripts/setup-dependencies.ps1
-pwsh -NoProfile -File scripts/publish.ps1 -Runtime win-x64
+dotnet run --project src/LemonLoader.Patcher.GUI
 ```
 
 Tests use generated fixtures. Do not commit APKs, decoded applications, Interop
@@ -44,6 +47,45 @@ validate fields they consume while tolerating additive metadata.
 Use scoped imperative commits and explain non-obvious ZIP, signing, rollback, or
 format decisions in the commit body. A format version changes only when an
 existing consumer cannot safely interpret the new semantics.
+
+## Local packages and source ownership
+
+```powershell
+pwsh -NoProfile -File scripts/setup-dependencies.ps1
+pwsh -NoProfile -File scripts/publish.ps1
+[xml]$properties = Get-Content Directory.Build.props -Raw
+pwsh -NoProfile -File scripts/package-release.ps1 `
+    -Version "v$($properties.Project.PropertyGroup.Version)"
+```
+
+Publishing builds both RIDs by default; pass the same Runtime to publishing and
+packaging to select one. Per-RID output under Output/Releases contains CLI, GUI
+and shared Tools/Il2CppInterop. Archives/checksums go to Output/Packages/<tag>.
+Staging is fresh and replacement atomic. Formal publish requires clean product
+and generator sources; AllowDirtySource is private local development only.
+
+Directory.Build.props owns the generator URL/revision. Setup/publishing reuse a
+matching sibling or .dependencies/Il2CppInterop/<revision>, never fetch/checkout
+an existing shared source. Il2CppInteropSourceRoot selects an explicit checkout.
+Builds are offline after preparation and do not need parent pins or Loader sources.
+Game artifacts and Loader ZIPs are not Patcher publication inputs.
+
+Test an actual Loader ZIP with scripts/test.ps1 -ReleaseArchive; multiple paths
+are accepted. This uses production validation without games, signing or installation.
+
+| Responsibility | Core module |
+| --- | --- |
+| One patch run/temporary workspace | ApkPatchPipeline |
+| Game inputs and generated Interop | GameInteropGenerator |
+| APK/directory payload | PayloadAssembler |
+| Transactional directory replacement | DirectoryInjector |
+| Explicit alignment/signing | ApkPostProcessor |
+| External execution | ProcessRunner and resolvers |
+
+External-tool deadlines cover exit and stdout/stderr draining. Cancellation kills
+the process tree while the direct child remains alive; already detached/reparented
+descendants cannot be discovered after its exit. The normal tests exercise the
+inherited-pipe case. Front ends never duplicate Core behavior.
 
 ## Publication audit
 

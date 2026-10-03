@@ -27,6 +27,9 @@ Current format numbers remain unchanged. Historical tools remain in Git history.
 
 Main installation rationale belongs to Loader docs; this local note records the
 Patcher contract so the repository remains independently maintainable.
+README links by task to docs/USAGE.md, docs/INTEROP.md and CONTRIBUTING.md rather
+than repeating command options and developer procedures. CLI help remains the
+complete installed option reference; the script catalog names maintained entries.
 
 ## Alternatives considered
 
