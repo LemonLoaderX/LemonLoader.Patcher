@@ -4,7 +4,8 @@ internal static class DirectoryInjector
         string gameRoot,
         string overlayRoot,
         IProgress<PatcherMessage>? progress,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<string, string, CancellationToken>? copyBackup = null)
     {
         ValidateTargets(gameRoot, overlayRoot);
         var transactionRoot = Path.Combine(
@@ -39,8 +40,9 @@ internal static class DirectoryInjector
                 {
                     backup = Path.Combine(backupRoot, relativePath);
                     Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                    File.Copy(destination, backup, true);
+                    (copyBackup ?? DirectoryPublisher.CopyFile)(destination, backup, cancellationToken);
                 }
+                cancellationToken.ThrowIfCancellationRequested();
                 File.Move(stagedPath, destination, true);
                 installed.Add((destination, backup));
             }

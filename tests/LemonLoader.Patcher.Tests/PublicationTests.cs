@@ -20,6 +20,62 @@ internal static class PublicationTests
             AssertThrows<ArgumentException>(() => new PatchRequest
             { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = root }.NormalizeAndValidate());
 
+            var tools = Path.Combine(root, "tools");
+            Directory.CreateDirectory(tools);
+            var tool = Path.Combine(tools, "tool.exe");
+            File.WriteAllText(tool, "input tool");
+            var key = Path.Combine(root, "fixture.keystore");
+            File.WriteAllText(key, "fixture");
+            foreach (var export in new[] { tools, tool })
+            {
+                AssertThrows<ArgumentException>(() => new PatchRequest
+                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = export,
+                    AlignApk = true, ZipAlignPath = tool }.NormalizeAndValidate());
+                AssertThrows<ArgumentException>(() => new PatchRequest
+                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = export,
+                    Signing = new(key, "fixture", "fixture"), ApkSignerPath = tool }.NormalizeAndValidate());
+            }
+            AssertEqual("input tool", File.ReadAllText(tool));
+            var previousPath = Environment.GetEnvironmentVariable("PATH");
+            try
+            {
+                Environment.SetEnvironmentVariable("PATH", tools);
+                foreach (var name in new[] { "zipalign", "apksigner" })
+                    File.WriteAllText(Path.Combine(tools, name), "resolved tool");
+                foreach (var signing in new[] { false, true })
+                    await AssertThrowsAsync<ArgumentException>(() => new ApkPatchPipeline(new PatchRequest
+                    {
+                        InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = tools,
+                        AlignApk = !signing, Signing = signing ? new(key, "fixture", "fixture") : null
+                    }).RunAsync());
+                AssertEqual("resolved tool", File.ReadAllText(Path.Combine(tools, "zipalign")));
+                AssertEqual("resolved tool", File.ReadAllText(Path.Combine(tools, "apksigner")));
+            }
+            finally { Environment.SetEnvironmentVariable("PATH", previousPath); }
+
+            var cancelledGame = Path.Combine(root, "cancelled-game");
+            var cancelledOverlay = Path.Combine(root, "cancelled-overlay");
+            var originalLibrary = GamePackageLayout.FilePath(cancelledGame, GamePackageLayout.MainLibrary);
+            var stagedLibrary = GamePackageLayout.FilePath(cancelledOverlay, GamePackageLayout.MainLibrary);
+            Directory.CreateDirectory(Path.GetDirectoryName(originalLibrary)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(stagedLibrary)!);
+            File.WriteAllText(originalLibrary, "original main");
+            File.WriteAllText(stagedLibrary, "new main");
+            Directory.CreateDirectory(Path.Combine(cancelledOverlay, "assets"));
+            File.WriteAllText(Path.Combine(cancelledOverlay, "assets", "installed-before-main"), "fixture");
+            using (var cancel = new CancellationTokenSource())
+            {
+                AssertThrows<OperationCanceledException>(() => DirectoryInjector.Apply(
+                    cancelledGame, cancelledOverlay, null, cancel.Token, copyBackup: (input, backup, token) =>
+                    {
+                        DirectoryPublisher.CopyFile(input, backup, token);
+                        cancel.Cancel();
+                    }));
+            }
+            AssertEqual("original main", File.ReadAllText(originalLibrary));
+            AssertTrue(!Directory.Exists(Path.Combine(cancelledGame, "assets")), "Cancellation did not roll back earlier files.");
+            AssertTrue(!Directory.GetDirectories(cancelledGame, ".lemonloader-patcher-*").Any(), "Cancelled transaction was not cleaned.");
+
             var source = Path.Combine(root, "source");
             Directory.CreateDirectory(source);
             File.WriteAllText(Path.Combine(source, "new.txt"), "new");

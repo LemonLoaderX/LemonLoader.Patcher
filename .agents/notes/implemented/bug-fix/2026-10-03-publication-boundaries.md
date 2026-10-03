@@ -11,10 +11,14 @@ Cancellation after publishing also misreports a completed operation as cancelled
 
 ## Decision
 
-Request validation rejects overlapping Interop export and input/output paths.
+Request validation rejects overlapping Interop export and input/output paths,
+including alignment/signing executables. Tools discovered on PATH are checked
+after resolution and before any export.
 Write targets and existing ancestors reject filesystem links. Copying and APK
 assembly check cancellation while operating on staging; directory injection rolls
-back applied files if cancelled before its commit. File/directory publication
+back applied files if cancelled before its commit. Backups use cancellable copy,
+and cancellation is checked again before replacing each destination, including
+the last file. File/directory publication
 checks cancellation before rename, and reports completion once committed.
 
 Backup deletion happens after commit. Its failure retains new output and remaining

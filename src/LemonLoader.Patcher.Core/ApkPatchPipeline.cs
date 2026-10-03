@@ -20,6 +20,11 @@ public sealed class ApkPatchPipeline
         if (request.InputKind == PatchInputKind.Apk)
         {
             postProcessing = ApkPostProcessor.Resolve(request.PostProcessing);
+            (request with
+            {
+                ZipAlignPath = postProcessing.ZipAlignPath,
+                ApkSignerPath = postProcessing.ApkSignerPath
+            }).NormalizeAndValidate();
             Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath!)!);
         }
 

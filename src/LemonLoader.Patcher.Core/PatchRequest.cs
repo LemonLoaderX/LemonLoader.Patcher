@@ -146,6 +146,7 @@ public sealed record PatchRequest
                 normalized.InputPath, normalized.ReleasePath, normalized.DeploymentPath,
                 normalized.GameAssemblyPath, normalized.MetadataPath, normalized.UnityLibrariesPath,
                 normalized.Cpp2IlPath, normalized.Il2CppInteropCliPath,
+                normalized.ZipAlignPath, normalized.ApkSignerPath,
                 normalized.Signing?.KeystorePath, normalized.OutputPath, normalized.ToolCacheRoot
             };
             foreach (var input in inputs.OfType<string>())
