@@ -6,6 +6,8 @@ internal static class GamePackageLayout
     public const string Il2CppLibrary = $"{Arm64LibraryRoot}/libil2cpp.so";
     public const string Metadata = "assets/bin/Data/Managed/Metadata/global-metadata.dat";
     public const string GlobalGameManagers = "assets/bin/Data/globalgamemanagers";
+    public const string MainData = "assets/bin/Data/mainData";
+    public const string DataBundle = "assets/bin/Data/data.unity3d";
 
     public static string FilePath(string root, string entryName) =>
         Path.Combine(root, entryName.Replace('/', Path.DirectorySeparatorChar));

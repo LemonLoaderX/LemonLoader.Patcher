@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Text;
 using Mono.Cecil;
 
 internal sealed record GeneratedInterop(string DirectoryPath, string UnityVersion);
@@ -15,14 +14,7 @@ internal sealed class GameInteropGenerator(
         ReportStage("Reading Unity game data");
         var inputRoot = Path.Combine(workRoot, "interop-input");
         Directory.CreateDirectory(inputRoot);
-        await ExtractInputsAsync(inputRoot, cancellationToken);
-        var unityVersion = request.UnityVersion ??
-                           DetectUnityVersion(Path.Combine(inputRoot, "globalgamemanagers"));
-        if (string.IsNullOrWhiteSpace(unityVersion))
-        {
-            throw new InvalidOperationException(
-                "Unity version was not supplied and could not be detected from globalgamemanagers.");
-        }
+        var unityVersion = await ExtractInputsAsync(inputRoot, cancellationToken);
 
         ReportStage($"Generating Interop assemblies for Unity {unityVersion}");
         var outputRoot = Path.Combine(workRoot, "interop");
@@ -50,7 +42,7 @@ internal sealed class GameInteropGenerator(
         "--use-opt-out-prefixing"
     ];
 
-    private async Task ExtractInputsAsync(
+    internal async Task<string> ExtractInputsAsync(
         string outputRoot,
         CancellationToken cancellationToken)
     {
@@ -64,6 +56,8 @@ internal sealed class GameInteropGenerator(
                     request.InputPath,
                     GamePackageLayout.UnityLibrary)),
                 "input directory");
+            var unityVersion = UnityVersionDetector.FromDirectory(
+                request.InputPath, request.UnityVersion, cancellationToken);
             CopyDirectoryInput(
                 request.GameAssemblyPath,
                 GamePackageLayout.FilePath(request.InputPath, GamePackageLayout.Il2CppLibrary),
@@ -74,13 +68,8 @@ internal sealed class GameInteropGenerator(
                 GamePackageLayout.FilePath(request.InputPath, GamePackageLayout.Metadata),
                 Path.Combine(outputRoot, "global-metadata.dat"),
                 GamePackageLayout.Metadata);
-            var managersPath = GamePackageLayout.FilePath(
-                request.InputPath,
-                GamePackageLayout.GlobalGameManagers);
-            if (File.Exists(managersPath))
-                File.Copy(managersPath, Path.Combine(outputRoot, "globalgamemanagers"), true);
             cancellationToken.ThrowIfCancellationRequested();
-            return;
+            return unityVersion;
         }
 
         using var apk = ZipFile.OpenRead(request.InputPath);
@@ -89,6 +78,7 @@ internal sealed class GameInteropGenerator(
             apk.GetEntry(GamePackageLayout.MainLibrary) is not null,
             apk.GetEntry(GamePackageLayout.UnityLibrary) is not null,
             "APK");
+        var apkUnityVersion = UnityVersionDetector.FromApk(apk, request.UnityVersion, cancellationToken);
         await CopyApkInputAsync(
             apk,
             request.GameAssemblyPath,
@@ -101,13 +91,7 @@ internal sealed class GameInteropGenerator(
             GamePackageLayout.Metadata,
             Path.Combine(outputRoot, "global-metadata.dat"),
             cancellationToken);
-        if (apk.GetEntry(GamePackageLayout.GlobalGameManagers) is { } managers)
-        {
-            await ExtractEntryAsync(
-                managers,
-                Path.Combine(outputRoot, "globalgamemanagers"),
-                cancellationToken);
-        }
+        return apkUnityVersion;
     }
 
     private async Task GenerateAssembliesAsync(
@@ -216,19 +200,6 @@ internal sealed class GameInteropGenerator(
         await using var input = entry.Open();
         await using var output = File.Create(destination);
         await input.CopyToAsync(output, cancellationToken);
-    }
-
-    private static string? DetectUnityVersion(string path)
-    {
-        if (!File.Exists(path))
-            return null;
-        var text = Encoding.ASCII.GetString(File.ReadAllBytes(path));
-        return System.Text.RegularExpressions.Regex.Matches(
-                text,
-                @"(?<![0-9])\d+\.\d+\.\d+[abfp]\d+(?![0-9])")
-            .Select(match => match.Value)
-            .Distinct(StringComparer.Ordinal)
-            .SingleOrDefault();
     }
 
     private static void NormalizeAssemblies(string directoryPath)

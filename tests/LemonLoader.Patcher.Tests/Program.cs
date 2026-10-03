@@ -58,6 +58,7 @@ var tests = new (string Name, Func<Task> Run)[]
 {
     ("Publication safety, cancellation and cache repair", PublicationTests.RunAsync),
     ("Unity version normalization", TestUnityVersionNormalizationAsync),
+    ("Structured Unity version detection", UnityVersionDetectionTests.RunAsync),
     ("Unity dependency cache repair", TestUnityDependencyCacheRepairAsync),
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
