@@ -8,7 +8,7 @@ internal static class ReleaseValidator
     private const string PayloadManifestPath = AndroidPayloadContract.PayloadManifestPath;
     private const int AssetLayoutVersion = AndroidPayloadContract.FormatVersion;
 
-    public static ReleaseValidationResult Validate(string releaseRoot)
+    public static ReleaseValidationResult Validate(string releaseRoot, CancellationToken cancellationToken = default)
     {
         var root = Path.GetFullPath(releaseRoot);
         var manifestPath = Path.Combine(root, ManifestName);
@@ -29,6 +29,7 @@ internal static class ReleaseValidator
         var verifiedFiles = new Dictionary<string, (long Size, string Hash)>(StringComparer.Ordinal);
         foreach (var entry in manifest.GetProperty("files").EnumerateArray())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var relativePath = entry.GetProperty("path").GetString()
                 ?? throw new InvalidDataException("A Release manifest file path is null.");
             var normalizedPath = ValidateRelativePath(root, relativePath);
@@ -141,6 +142,9 @@ internal static class ReleaseValidator
             throw new InvalidDataException("The Release managed runtime engine is missing or differs from its source provenance.");
         foreach (var name in new[] { "System.Private.CoreLib.dll", "libclrjit.so" })
             RequireRuntimeFile($"{sharedRuntimeRoot}/{name}");
+        foreach (var name in new[] { "MelonLoader.dll", "MelonLoader.NativeHost.dll" })
+            RequireRuntimeFile($"{AndroidPayloadContract.LoaderRoot}/net6/{name}");
+        RequireRuntimeFile($"{AndroidPayloadContract.LoaderRoot}/Dependencies/SupportModules/Il2Cpp.dll");
 
         var androidCrypto = $"{sharedRuntimeRoot}/libSystem.Security.Cryptography.Native.Android.so";
         var opensslCrypto = $"{sharedRuntimeRoot}/libSystem.Security.Cryptography.Native.OpenSsl.so";

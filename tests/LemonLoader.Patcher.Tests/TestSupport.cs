@@ -56,6 +56,8 @@ internal static class TestSupport
         var releaseRoot = Path.Combine(root, $"release-{Guid.NewGuid():N}");
         WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
         WritePayload(releaseRoot, $"{AndroidPayloadContract.LoaderRoot}/net6/MelonLoader.dll", "loader");
+        WritePayload(releaseRoot, $"{AndroidPayloadContract.LoaderRoot}/net6/MelonLoader.NativeHost.dll", "native-host");
+        WritePayload(releaseRoot, $"{AndroidPayloadContract.LoaderRoot}/Dependencies/SupportModules/Il2Cpp.dll", "support");
         const string version = "11.0.0";
         var shared = $"{AndroidPayloadContract.DotnetRoot}/shared/Microsoft.NETCore.App/{version}";
         foreach (var name in new[] { "libcoreclr.so", "libclrjit.so", "System.Private.CoreLib.dll" })

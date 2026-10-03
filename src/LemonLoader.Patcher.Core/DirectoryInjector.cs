@@ -3,7 +3,8 @@ internal static class DirectoryInjector
     public static void Apply(
         string gameRoot,
         string overlayRoot,
-        IProgress<PatcherMessage>? progress)
+        IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken = default)
     {
         ValidateTargets(gameRoot, overlayRoot);
         var transactionRoot = Path.Combine(
@@ -18,7 +19,7 @@ internal static class DirectoryInjector
         var preserveTransaction = false;
         try
         {
-            CopyTree(overlayRoot, stagedRoot);
+            DirectoryPublisher.CopyDirectory(overlayRoot, stagedRoot, cancellationToken);
             var stagedFiles = Directory.GetFiles(stagedRoot, "*", SearchOption.AllDirectories)
                 .OrderBy(
                     path => Path.GetRelativePath(stagedRoot, path).Replace('\\', '/'),
@@ -26,6 +27,7 @@ internal static class DirectoryInjector
                 .ToArray();
             foreach (var stagedPath in stagedFiles)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var relativePath = Path.GetRelativePath(stagedRoot, stagedPath);
                 var destination = Path.Combine(gameRoot, relativePath);
                 CreateMissingDirectories(
@@ -56,6 +58,7 @@ internal static class DirectoryInjector
                     failure,
                     rollbackFailure);
             }
+            if (failure is OperationCanceledException) throw;
             throw new IOException(
                 "Directory injection failed. Files changed by this operation were restored.",
                 failure);
@@ -68,12 +71,12 @@ internal static class DirectoryInjector
                     Directory.Delete(transactionRoot, true);
             }
             catch (Exception cleanupException)
-                when ((committed || operationFailed) && progress is not null)
+                when (committed || operationFailed)
             {
                 var outcome = committed
                     ? "succeeded"
                     : "failed and was rolled back";
-                progress.Report(new(
+                progress?.Report(new(
                     PatcherMessageKind.Warning,
                     $"Directory injection {outcome}, but transaction directory '{transactionRoot}' " +
                     $"could not be removed: {cleanupException.Message}"));
@@ -83,10 +86,12 @@ internal static class DirectoryInjector
 
     private static void ValidateTargets(string gameRoot, string overlayRoot)
     {
+        PathSafety.RejectLinks(gameRoot);
         foreach (var sourcePath in Directory.GetFiles(overlayRoot, "*", SearchOption.AllDirectories))
         {
             var entryName = Path.GetRelativePath(overlayRoot, sourcePath).Replace('\\', '/');
             var destination = GamePackageLayout.FilePath(gameRoot, entryName);
+            PathSafety.RejectLinks(destination);
             if (Directory.Exists(destination))
             {
                 throw new InvalidDataException(
@@ -142,18 +147,6 @@ internal static class DirectoryInjector
         catch (Exception rollbackFailure)
         {
             return rollbackFailure;
-        }
-    }
-
-    private static void CopyTree(string sourceRoot, string destinationRoot)
-    {
-        foreach (var sourcePath in Directory.GetFiles(sourceRoot, "*", SearchOption.AllDirectories))
-        {
-            var destination = Path.Combine(
-                destinationRoot,
-                Path.GetRelativePath(sourceRoot, sourcePath));
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(sourcePath, destination);
         }
     }
 

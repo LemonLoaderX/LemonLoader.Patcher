@@ -138,6 +138,24 @@ public sealed record PatchRequest
             throw new ArgumentException(
                 $"Signing keystore was not found at '{normalizedSigning.KeystorePath}'.");
         }
+        if (normalized.InteropOutputPath is { } export)
+        {
+            PathSafety.RejectLinks(export);
+            var inputs = new[]
+            {
+                normalized.InputPath, normalized.ReleasePath, normalized.DeploymentPath,
+                normalized.GameAssemblyPath, normalized.MetadataPath, normalized.UnityLibrariesPath,
+                normalized.Cpp2IlPath, normalized.Il2CppInteropCliPath,
+                normalized.Signing?.KeystorePath, normalized.OutputPath, normalized.ToolCacheRoot
+            };
+            foreach (var input in inputs.OfType<string>())
+            {
+                if (PathSafety.Contains(export, input) ||
+                    (Directory.Exists(input) && PathSafety.Contains(input, export)))
+                    throw new ArgumentException("Interop output must not overlap game, dependency, deployment or other input/output paths.");
+            }
+        }
+        if (inputIsDirectory) PathSafety.RejectLinks(normalized.InputPath);
         return normalized;
     }
 }

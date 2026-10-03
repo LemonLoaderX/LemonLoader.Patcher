@@ -107,14 +107,23 @@ internal static class ReleaseResolver
         string root,
         IProgress<PatcherMessage>? progress = null,
         CancellationToken cancellationToken = default,
-        string runtimeVariant = RuntimeVariants.Default)
+        string runtimeVariant = RuntimeVariants.Default,
+        string? extractionRoot = null)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        return await ResolveLatestAsync(root, client, progress, cancellationToken, runtimeVariant, extractionRoot);
+    }
+
+    internal static async Task<string> ResolveLatestAsync(
+        string root, HttpClient client, IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken, string runtimeVariant, string? extractionRoot = null)
     {
         runtimeVariant = RuntimeVariants.Normalize(runtimeVariant);
         var releaseFileName = RuntimeVariants.ArchiveName(runtimeVariant);
         var latestUrl = "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/" + releaseFileName;
         Directory.CreateDirectory(root);
         var path = Path.Combine(root, releaseFileName);
-        if (File.Exists(path) && IsReadableRelease(path, runtimeVariant))
+        if (File.Exists(path) && IsReadableRelease(path, runtimeVariant, extractionRoot, cancellationToken))
         {
             progress?.Report(new(
                 PatcherMessageKind.Stage,
@@ -128,7 +137,6 @@ internal static class ReleaseResolver
         var temporaryPath = Path.Combine(root, $".{releaseFileName}.{Guid.NewGuid():N}.download");
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
             using var response = await client.GetAsync(
                 latestUrl,
                 HttpCompletionOption.ResponseHeadersRead,
@@ -144,7 +152,7 @@ internal static class ReleaseResolver
             {
                 await response.Content.CopyToAsync(output, cancellationToken);
             }
-            if (!IsReadableRelease(temporaryPath, runtimeVariant))
+            if (!IsReadableRelease(temporaryPath, runtimeVariant, extractionRoot, cancellationToken))
             {
                 throw new InvalidDataException(
                     "Downloaded LemonLoader Release is not a valid Release archive.");
@@ -170,16 +178,19 @@ internal static class ReleaseResolver
         }
     }
 
-    private static bool IsReadableRelease(string archivePath, string variant)
+    private static bool IsReadableRelease(string archivePath, string variant, string? extractionRoot, CancellationToken cancellationToken)
     {
+        var root = extractionRoot ?? Path.Combine(Path.GetTempPath(), $"lemonloader-release-validation-{Guid.NewGuid():N}");
+        var validated = false;
         try
         {
             using var archive = ZipFile.OpenRead(archivePath);
-            var manifest = archive.GetEntry("lemonloader-release.json");
-            if (manifest is null || archive.GetEntry(AndroidPayloadContract.PayloadManifestPath) is null) return false;
-            using var input = manifest.Open();
+            ArchiveSafety.Extract(archive, root, cancellationToken);
+            ReleaseValidator.Validate(root, cancellationToken);
+            using var input = File.OpenRead(Path.Combine(root, "lemonloader-release.json"));
             using var document = System.Text.Json.JsonDocument.Parse(input);
             RuntimeVariants.ValidateManifest(document.RootElement, variant);
+            validated = true;
             return true;
         }
         catch (InvalidDataException)
@@ -187,5 +198,12 @@ internal static class ReleaseResolver
             return false;
         }
         catch (System.Text.Json.JsonException) { return false; }
+        catch (IOException) { return false; }
+        catch (KeyNotFoundException) { return false; }
+        catch (InvalidOperationException) { return false; }
+        finally
+        {
+            if ((!validated || extractionRoot is null) && Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 }

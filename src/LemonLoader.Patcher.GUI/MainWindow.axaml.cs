@@ -53,7 +53,7 @@ public sealed partial class MainWindow : Window
         catch (OperationCanceledException) when (operationCancellation.IsCancellationRequested)
         {
             StatusText.Text = "Cancelled";
-            AppendLog("cancelled", "No output was published.");
+            AppendLog("cancelled", "The patch was not committed. A requested Interop export may already be available.");
             RefreshLog();
         }
         catch (ArgumentException exception)
@@ -77,8 +77,8 @@ public sealed partial class MainWindow : Window
         IProgress<PatcherMessage> progress,
         CancellationToken cancellationToken)
     {
-        var result = await new ApkPatchPipeline(BuildPatchRequest(), progress)
-            .RunAsync(cancellationToken);
+        var pipeline = new ApkPatchPipeline(BuildPatchRequest(), progress);
+        var result = await Task.Run(() => pipeline.RunAsync(cancellationToken), cancellationToken);
         DrainProgress();
         StatusText.Text = result.ModifiedInPlace ? "Directory ready" : "APK ready";
         AppendLog("result", result.OutputPath);
@@ -91,10 +91,9 @@ public sealed partial class MainWindow : Window
         IProgress<PatcherMessage> progress,
         CancellationToken cancellationToken)
     {
-        var result = await UnityDependenciesPipeline.RunAsync(
-            BuildDependenciesRequest(),
-            progress,
-            cancellationToken);
+        var request = BuildDependenciesRequest();
+        var result = await Task.Run(() => UnityDependenciesPipeline.RunAsync(
+            request, progress, cancellationToken), cancellationToken);
         DrainProgress();
         StatusText.Text = $"Restored {result.AssemblyCount} Unity assemblies";
         AppendLog("result", result.OutputPath);

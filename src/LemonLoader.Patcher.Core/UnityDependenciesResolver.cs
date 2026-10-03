@@ -237,8 +237,9 @@ internal static class UnityDependenciesResolver
             inspection.ContentSha256);
     }
 
-    public static void Publish(UnityDependenciesResolution resolution, string destinationPath) =>
-        DirectoryPublisher.Replace(resolution.DirectoryPath, destinationPath);
+    public static void Publish(UnityDependenciesResolution resolution, string destinationPath,
+        IProgress<PatcherMessage>? progress = null, CancellationToken cancellationToken = default) =>
+        DirectoryPublisher.Replace(resolution.DirectoryPath, destinationPath, progress, cancellationToken);
 
     public static int Validate(string directoryPath) => Inspect(directoryPath).AssemblyCount;
 

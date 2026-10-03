@@ -141,7 +141,7 @@ try {
         formatVersion = 1
         revision = $actualIl2CppInteropRevision
         upstream = "https://github.com/BepInEx/Il2CppInterop.git"
-        upstreamCommit = "f03c8f4ae507d47ea814f3d11d1ec6b0391c1576"
+        upstreamCommit = "81a6f78c8b653e0da4a3420ac4cd00819e8b6292"
     } | ConvertTo-Json | Set-Content `
         -LiteralPath (Join-Path $toolOutput "lemonloader-il2cppinterop.json") `
         -Encoding utf8
@@ -236,9 +236,6 @@ try {
                 }
                 Move-Item -LiteralPath $runtimeStaging -Destination $runtimeOutput
                 $publishedNew = $true
-                if ($movedExisting) {
-                    Remove-Item -LiteralPath $backup -Recurse -Force
-                }
             }
             catch {
                 $publishError = $_.Exception.Message
@@ -279,7 +276,8 @@ try {
                 -Force)
             foreach ($staleBackup in $staleBackups) {
                 Assert-ChildPath -Path $staleBackup.FullName -Parent $releaseRoot
-                Remove-Item -LiteralPath $staleBackup.FullName -Recurse -Force
+                try { Remove-Item -LiteralPath $staleBackup.FullName -Recurse -Force }
+                catch { Write-Warning "Published '$runtimeOutput', but could not remove backup '$($staleBackup.FullName)': $($_.Exception.Message)" }
             }
             Write-Host "Published LemonLoader.Patcher for $runtimeIdentifier to:"
             Write-Host "  $runtimeOutput"

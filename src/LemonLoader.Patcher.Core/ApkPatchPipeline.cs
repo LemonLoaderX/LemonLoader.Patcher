@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Security.Cryptography;
 
 public sealed class ApkPatchPipeline
 {
@@ -42,23 +41,22 @@ public sealed class ApkPatchPipeline
             if (request.InputKind == PatchInputKind.Directory)
             {
                 ReportStage("Injecting payload into directory");
-                PayloadAssembler.InjectDirectory(request.InputPath, payload, progress);
+                PayloadAssembler.InjectDirectory(request.InputPath, payload, progress, cancellationToken);
                 ReportStage("Directory ready");
                 return new(request.InputPath, null, generatedInterop.UnityVersion, true);
             }
 
             ReportStage("Packaging APK payload");
             var patchedApk = Path.Combine(workRoot, "patched.apk");
-            File.Copy(request.InputPath, patchedApk, true);
-            PayloadAssembler.MergeApk(patchedApk, payload);
-            await ApkPostProcessor.PublishAsync(
+            DirectoryPublisher.CopyFile(request.InputPath, patchedApk, cancellationToken);
+            PayloadAssembler.MergeApk(patchedApk, payload, cancellationToken);
+            var hash = await ApkPostProcessor.PublishAsync(
                 patchedApk,
                 request.OutputPath!,
                 workRoot,
                 postProcessing!,
                 progress,
                 cancellationToken);
-            var hash = await ComputeHashAsync(request.OutputPath!, cancellationToken);
             ReportStage("APK ready");
             return new(request.OutputPath!, hash, generatedInterop.UnityVersion, false);
         }
@@ -73,20 +71,24 @@ public sealed class ApkPatchPipeline
         CancellationToken cancellationToken)
     {
         ReportStage("Resolving LemonLoader Release");
+        var releaseRoot = Path.Combine(workRoot, "release");
         var releaseArchive = request.ReleasePath ?? await ReleaseResolver.ResolveLatestAsync(
             request.ToolCacheRoot,
             progress,
             cancellationToken,
-            RuntimeVariants.Normalize(request.RuntimeVariant));
+            RuntimeVariants.Normalize(request.RuntimeVariant), releaseRoot);
         if (!File.Exists(releaseArchive))
         {
             throw new FileNotFoundException(
                 $"LemonLoader Release was not found at '{releaseArchive}'.");
         }
-        var releaseRoot = Path.Combine(workRoot, "release");
-        ZipFile.ExtractToDirectory(releaseArchive, releaseRoot);
-        var validation = ReleaseValidator.Validate(releaseRoot);
-        if (request.RuntimeVariant is not null || request.ReleasePath is null)
+        if (request.ReleasePath is null) return new ReleaseValidationResult(releaseRoot);
+        using (var archive = ZipFile.OpenRead(releaseArchive))
+        {
+            ArchiveSafety.Extract(archive, releaseRoot, cancellationToken);
+        }
+        var validation = ReleaseValidator.Validate(releaseRoot, cancellationToken);
+        if (request.RuntimeVariant is not null)
         {
             using var manifest = System.Text.Json.JsonDocument.Parse(
                 File.ReadAllText(Path.Combine(releaseRoot, "lemonloader-release.json")));
@@ -108,15 +110,6 @@ public sealed class ApkPatchPipeline
                 PatcherMessageKind.Warning,
                 $"Could not remove temporary directory '{workRoot}': {exception.Message}"));
         }
-    }
-
-    private static async Task<string> ComputeHashAsync(
-        string path,
-        CancellationToken cancellationToken)
-    {
-        await using var input = File.OpenRead(path);
-        return Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken))
-            .ToLowerInvariant();
     }
 
     private void ReportStage(string message) =>

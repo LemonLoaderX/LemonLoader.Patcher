@@ -28,7 +28,7 @@ internal sealed class GameInteropGenerator(
         var outputRoot = Path.Combine(workRoot, "interop");
         await GenerateAssembliesAsync(inputRoot, outputRoot, unityVersion, cancellationToken);
         if (request.InteropOutputPath is not null)
-            DirectoryPublisher.Replace(outputRoot, request.InteropOutputPath);
+            DirectoryPublisher.Replace(outputRoot, request.InteropOutputPath, progress, cancellationToken);
         return new(outputRoot, unityVersion);
     }
 
@@ -84,6 +84,7 @@ internal sealed class GameInteropGenerator(
         }
 
         using var apk = ZipFile.OpenRead(request.InputPath);
+        ArchiveSafety.Validate(apk);
         ValidateUnityLayout(
             apk.GetEntry(GamePackageLayout.MainLibrary) is not null,
             apk.GetEntry(GamePackageLayout.UnityLibrary) is not null,

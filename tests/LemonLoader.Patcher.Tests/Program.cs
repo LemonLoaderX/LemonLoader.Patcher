@@ -46,6 +46,7 @@ if (args is ["--spawn-output-holder", var childFile])
 var apkVerificationScript = args is ["--verify-apk-script", var script] ? Path.GetFullPath(script) : null;
 var tests = new (string Name, Func<Task> Run)[]
 {
+    ("Publication safety, cancellation and cache repair", PublicationTests.RunAsync),
     ("Unity version normalization", TestUnityVersionNormalizationAsync),
     ("Unity dependency cache repair", TestUnityDependencyCacheRepairAsync),
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
@@ -139,11 +140,7 @@ static async Task TestRuntimeSelectionAsync()
             AssertThrows<InvalidDataException>(() => RuntimeVariants.ValidateManifest(
                 manifest.RootElement, variant == "android" ? "bionic" : "android"));
             var cached = Path.Combine(root, RuntimeVariants.ArchiveName(variant));
-            CreateZip(cached, new Dictionary<string, string>
-            {
-                ["lemonloader-release.json"] = manifest.RootElement.GetRawText(),
-                [AndroidPayloadContract.PayloadManifestPath] = "{}"
-            });
+            ZipFile.CreateFromDirectory(CreateReleaseTree(root, rid), cached);
             AssertEqual(cached, await ReleaseResolver.ResolveLatestAsync(root, runtimeVariant: variant));
         }
         var input = Path.Combine(root, "input.apk");

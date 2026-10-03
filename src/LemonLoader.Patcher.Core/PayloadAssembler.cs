@@ -16,7 +16,7 @@ internal static class PayloadAssembler
         WriteIndented = true
     };
 
-    public static void MergeApk(string apkPath, PayloadSource source)
+    public static void MergeApk(string apkPath, PayloadSource source, CancellationToken cancellationToken = default)
     {
         var payload = ReadPayloadDescriptor(GamePackageLayout.FilePath(
             source.ReleaseRoot,
@@ -24,18 +24,18 @@ internal static class PayloadAssembler
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Update);
         ValidateUniqueEntries(archive);
         RejectExistingLoaderPayload(archive);
-        AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets");
+        AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets", cancellationToken);
         ValidateRuntimeEntries(archive);
-        AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"));
+        AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"), cancellationToken);
         foreach (var dll in Directory.GetFiles(source.InteropRoot, "*.dll"))
         {
             AddFile(
                 archive,
                 dll,
-                $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}");
+                $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}", cancellationToken: cancellationToken);
         }
         if (source.DeploymentPath is not null)
-            AddDeploymentRoot(archive, source.DeploymentPath);
+            AddDeploymentRoot(archive, source.DeploymentPath, cancellationToken);
         ValidateDeploymentEntries(archive);
         RefreshPayloadDescriptor(
             archive,
@@ -47,7 +47,8 @@ internal static class PayloadAssembler
     public static void InjectDirectory(
         string gameRoot,
         PayloadSource source,
-        IProgress<PatcherMessage>? progress)
+        IProgress<PatcherMessage>? progress,
+        CancellationToken cancellationToken = default)
     {
         gameRoot = Path.GetFullPath(gameRoot);
         if (!Directory.Exists(gameRoot))
@@ -73,9 +74,9 @@ internal static class PayloadAssembler
         try
         {
             var originalEntries = CreateDirectorySeedApk(gameRoot, stagingApk);
-            MergeApk(stagingApk, source);
-            ExtractDirectoryOverlay(stagingApk, overlayRoot, originalEntries);
-            DirectoryInjector.Apply(gameRoot, overlayRoot, progress);
+            MergeApk(stagingApk, source, cancellationToken);
+            ExtractDirectoryOverlay(stagingApk, overlayRoot, originalEntries, cancellationToken);
+            DirectoryInjector.Apply(gameRoot, overlayRoot, progress, cancellationToken);
         }
         finally
         {
@@ -84,9 +85,9 @@ internal static class PayloadAssembler
                 if (Directory.Exists(workRoot))
                     Directory.Delete(workRoot, true);
             }
-            catch (Exception cleanupException) when (progress is not null)
+            catch (Exception cleanupException)
             {
-                progress.Report(new(
+                progress?.Report(new(
                     PatcherMessageKind.Warning,
                     $"Could not remove temporary directory '{workRoot}': {cleanupException.Message}"));
             }
@@ -112,7 +113,8 @@ internal static class PayloadAssembler
     private static void ExtractDirectoryOverlay(
         string apkPath,
         string overlayRoot,
-        IReadOnlySet<string> originalEntries)
+        IReadOnlySet<string> originalEntries,
+        CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(overlayRoot);
         using var archive = ZipFile.OpenRead(apkPath);
@@ -133,7 +135,9 @@ internal static class PayloadAssembler
                     $"Payload entry '{entry.FullName}' escapes the staging directory.");
             }
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            entry.ExtractToFile(destination);
+            using var input = entry.Open();
+            using var output = File.Create(destination);
+            DirectoryPublisher.CopyStream(input, output, cancellationToken);
         }
     }
 
@@ -179,11 +183,7 @@ internal static class PayloadAssembler
 
     private static void ValidateUniqueEntries(ZipArchive archive)
     {
-        var duplicate = archive.Entries
-            .GroupBy(entry => entry.FullName, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Count() != 1);
-        if (duplicate is not null)
-            throw new InvalidDataException($"APK contains duplicate ZIP entry '{duplicate.Key}'.");
+        ArchiveSafety.Validate(archive);
     }
 
     private static void ValidateRuntimeEntries(ZipArchive archive)
@@ -270,18 +270,18 @@ internal static class PayloadAssembler
         }
     }
 
-    private static void AddTree(ZipArchive archive, string root, string prefix)
+    private static void AddTree(ZipArchive archive, string root, string prefix, CancellationToken cancellationToken)
     {
         foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
         {
             AddFile(
                 archive,
                 file,
-                $"{prefix}/{Path.GetRelativePath(root, file).Replace('\\', '/')}");
+                $"{prefix}/{Path.GetRelativePath(root, file).Replace('\\', '/')}", cancellationToken: cancellationToken);
         }
     }
 
-    private static void AddNativeTree(ZipArchive archive, string root)
+    private static void AddNativeTree(ZipArchive archive, string root, CancellationToken cancellationToken)
     {
         foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
         {
@@ -290,11 +290,11 @@ internal static class PayloadAssembler
                 archive,
                 file,
                 name,
-                replaceExisting: name == GamePackageLayout.MainLibrary);
+                replaceExisting: name == GamePackageLayout.MainLibrary, cancellationToken: cancellationToken);
         }
     }
 
-    private static void AddDeploymentRoot(ZipArchive archive, string sourcePath)
+    private static void AddDeploymentRoot(ZipArchive archive, string sourcePath, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(sourcePath))
             throw new FileNotFoundException(
@@ -310,7 +310,7 @@ internal static class PayloadAssembler
         {
             var relativePath = Path.GetRelativePath(sourcePath, file).Replace('\\', '/');
             ValidateDeploymentRootPath(relativePath);
-            AddFile(archive, file, $"{AndroidPayloadContract.DeploymentRoot}/{relativePath}");
+            AddFile(archive, file, $"{AndroidPayloadContract.DeploymentRoot}/{relativePath}", cancellationToken: cancellationToken);
         }
     }
 
@@ -336,8 +336,10 @@ internal static class PayloadAssembler
         ZipArchive archive,
         string path,
         string name,
-        bool replaceExisting = false)
+        bool replaceExisting = false,
+        CancellationToken cancellationToken = default)
     {
+        ArchiveSafety.ValidatePath(name);
         var existing = archive.GetEntry(name);
         if (existing is not null && !replaceExisting)
         {
@@ -346,12 +348,14 @@ internal static class PayloadAssembler
                 $"Only '{GamePackageLayout.MainLibrary}' may be replaced.");
         }
         existing?.Delete();
-        archive.CreateEntryFromFile(
-            path,
+        var entry = archive.CreateEntry(
             name,
             name.StartsWith("lib/", StringComparison.Ordinal)
                 ? CompressionLevel.NoCompression
                 : CompressionLevel.Optimal);
+        using var input = File.OpenRead(path);
+        using var output = entry.Open();
+        DirectoryPublisher.CopyStream(input, output, cancellationToken);
     }
 
     private static void RequireFile(string path, string description)

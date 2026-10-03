@@ -79,6 +79,15 @@ foreach ($relativePath in $expectedPolicies.Keys) {
 
 $archive = [IO.Compression.ZipFile]::OpenRead($apk)
 try {
+    foreach ($entry in $archive.Entries) {
+        $name = $entry.FullName
+        $path = if ($name.EndsWith('/')) { $name.Substring(0, $name.Length - 1) } else { $name }
+        if (!$path -or $path.Contains('\') -or $path.Contains(':') -or
+            $path -match '[\x00-\x1f\x7f]' -or
+            @($path.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -ne 0) {
+            throw "APK contains unsafe ZIP entry '$name'."
+        }
+    }
     $duplicate = $archive.Entries |
         Group-Object FullName -CaseSensitive |
         Where-Object Count -ne 1 |
@@ -99,9 +108,13 @@ try {
 
     foreach ($required in @(
         "lib/arm64-v8a/libmain.so",
+        "assets/LemonLoader/runtime/loader/net6/MelonLoader.dll",
+        "assets/LemonLoader/runtime/loader/net6/MelonLoader.NativeHost.dll",
+        "assets/LemonLoader/runtime/loader/Dependencies/SupportModules/Il2Cpp.dll",
         "assets/LemonLoader/payload.json")) {
-        if ($null -eq $archive.GetEntry($required)) {
-            throw "APK is missing required LemonLoader entry '$required'."
+        $requiredEntry = $archive.GetEntry($required)
+        if ($null -eq $requiredEntry -or $requiredEntry.Length -eq 0) {
+            throw "APK is missing or has an empty required LemonLoader entry '$required'."
         }
     }
     $payloadEntry = $archive.GetEntry("assets/LemonLoader/payload.json")

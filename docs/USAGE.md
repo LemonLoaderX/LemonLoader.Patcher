@@ -26,6 +26,8 @@ CLI/LemonLoader.Patcher.CLI.exe patch UnpackedGame --release Loader.zip
 Patcher does not bundle a Loader archive. An omitted --release resolves the
 selected latest Loader distribution. Fully offline work requires a local Release,
 Unity references and the verified Cpp2IL tool already cached or explicitly supplied.
+Valid cached Releases are reused offline; remove the owned .tools runtime ZIP
+to request a newer download. Invalid caches are validated and replaced automatically.
 
 ## Deployment
 
@@ -80,6 +82,12 @@ Progress/tool output goes to stderr. Successful APK patch writes output, sha256
 and unity-version lines to stdout. Directory mode reports its modified input path
 and omits sha256. Exit codes: 0 success, 1 execution failure, 2 invalid usage,
 130 cancellation. --verbose adds exception details.
+
+Cancellation before commit preserves the previous APK or restores directory
+changes. Once committed, the result is successful even if cancellation arrives.
+A requested Interop export can complete before APK injection; cancelling the
+patch does not remove that independently published directory. Backup cleanup
+warnings preserve the committed result and identify remaining recovery files.
 
 [Interop](INTEROP.md) covers input overrides, export and Unity reference restoration.
 Manual Loader installation and runtime/Mod behavior live in the

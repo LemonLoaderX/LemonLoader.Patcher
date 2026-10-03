@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 internal sealed record ApkPostProcessingOptions(
     bool Align,
     string? ZipAlignPath,
@@ -20,7 +22,7 @@ internal static class ApkPostProcessor
             ? ExternalToolResolver.Resolve("apksigner", options.ApkSignerPath, "--apksigner")
             : null);
 
-    public static async Task PublishAsync(
+    public static async Task<string> PublishAsync(
         string patchedApk,
         string outputPath,
         string workRoot,
@@ -50,8 +52,7 @@ internal static class ApkPostProcessor
 
         if (options.Signing is null)
         {
-            DirectoryPublisher.ReplaceFile(currentApk, outputPath);
-            return;
+            return await CommitAsync(currentApk, outputPath, cancellationToken);
         }
 
         var signed = Path.Combine(workRoot, "signed.apk");
@@ -76,7 +77,16 @@ internal static class ApkPostProcessor
             progress,
             cancellationToken,
             "verify", "--verbose", signed);
-        DirectoryPublisher.ReplaceFile(signed, outputPath);
+        return await CommitAsync(signed, outputPath, cancellationToken);
+    }
+
+    private static async Task<string> CommitAsync(string source, string destination, CancellationToken cancellationToken)
+    {
+        string hash;
+        await using (var input = File.OpenRead(source))
+            hash = Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken)).ToLowerInvariant();
+        DirectoryPublisher.ReplaceFile(source, destination, cancellationToken);
+        return hash;
     }
 
     internal static SigningInvocation CreateSigningInvocation(

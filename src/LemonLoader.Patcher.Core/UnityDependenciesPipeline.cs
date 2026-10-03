@@ -40,7 +40,7 @@ public static class UnityDependenciesPipeline
             request.UnityVersion,
             progress,
             cancellationToken);
-        UnityDependenciesResolver.Publish(resolution, outputPath);
+        UnityDependenciesResolver.Publish(resolution, outputPath, progress, cancellationToken);
         progress?.Report(new(
             PatcherMessageKind.Stage,
             $"Published {resolution.AssemblyCount} Unity assemblies"));

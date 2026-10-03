@@ -16,6 +16,8 @@ Interop output is a published copy of newly generated DLLs and the host-side
 interop-manifest.json; it is not an existing assembly input. Replacement occurs
 only after successful generation. The manifest records source/tool/CLI/dependency
 identity for diagnosis and Mod development; it is not injected into layout 9.
+The entire export directory is replaced. It must not overlap game, deployment,
+dependency or other input/output paths; linked destinations are rejected.
 
 Packages bundle the generator built from Patcher's own Directory.Build.props pin.
 The net6 generator permits major runtime roll-forward to Patcher's required
