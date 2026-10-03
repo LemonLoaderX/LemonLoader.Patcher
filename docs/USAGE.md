@@ -3,6 +3,8 @@
 Packages require .NET 10. Windows executable: ./LemonLoader.Patcher.CLI.exe;
 Linux: CLI/LemonLoader.Patcher.CLI. Use `patch --help` for the complete option
 contract. GUI/LemonLoader.Patcher.GUI exposes the same Core pipeline.
+GUI managed dependencies are bundled into its executable; adjacent native graphics
+libraries and Tools/Il2CppInterop remain required. Move the whole extracted directory.
 
 ## Inputs
 

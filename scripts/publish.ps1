@@ -38,7 +38,7 @@ $projects = @(
     [pscustomobject]@{
         Name = "GUI"
         Path = Join-Path $repositoryRoot "src\LemonLoader.Patcher.GUI\LemonLoader.Patcher.GUI.csproj"
-        SingleFile = $false
+        SingleFile = $true
     }
 )
 
@@ -177,6 +177,7 @@ try {
                     --output $publishOutput `
                     --no-self-contained `
                     -p:PublishSingleFile=$($project.SingleFile.ToString().ToLowerInvariant()) `
+                    -p:IncludeNativeLibrariesForSelfExtract=false `
                     -p:DebugType=None `
                     -p:DebugSymbols=false
                 if ($LASTEXITCODE -ne 0) {

@@ -63,6 +63,9 @@ packaging to select one. Per-RID output under Output/Releases contains independe
 CLI and GUI directories, each with its own Tools/Il2CppInterop and legal files.
 Packaging emits separate GUI/CLI archives with the executable at archive root;
 each extracted directory can move independently. Archives/checksums go to Output/Packages/<tag>.
+Both front ends bundle managed assemblies and runtime configuration into their
+executables. GUI native graphics libraries remain adjacent files, avoiding
+startup extraction. Bundled generator dependencies remain in Tools/Il2CppInterop.
 Staging is fresh and replacement atomic. Formal publish requires clean product
 and generator sources; AllowDirtySource is private local development only.
 

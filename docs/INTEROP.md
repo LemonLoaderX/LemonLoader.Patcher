@@ -4,6 +4,10 @@ Patcher extracts the game's libil2cpp.so/global-metadata.dat, detects the Unity
 version and restores matching Unity reference DLLs. --game-assembly, --metadata
 and --unity-version override individual inputs; --unity-libraries supplies an
 existing reference directory. Overrides must still match the actual game.
+Automatic version detection searches globalgamemanagers for a unique version
+string such as 6000.3.8f1; it does not parse the serialized asset header or inspect
+libunity.so. Missing files, no match or multiple distinct versions require an
+explicit --unity-version (Unity version in GUI).
 
 ```powershell
 ./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `

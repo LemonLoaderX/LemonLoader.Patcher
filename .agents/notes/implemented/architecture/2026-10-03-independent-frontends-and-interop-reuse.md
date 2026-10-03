@@ -21,6 +21,10 @@ Tools/Il2CppInterop and legal files. GUI/CLI are separate archives per RID, with
 the executable at archive root. Runtime lookup uses only its adjacent Tools;
 explicit generator overrides remain supported. CI uploads both archives and the
 combined checksum list. The generator is built once and copied into each tree.
+CLI and GUI publish as framework-dependent single-file executables containing
+managed assemblies and runtime configuration. GUI native graphics libraries
+remain adjacent rather than extracting from the executable at startup. External
+generator files remain in Tools/Il2CppInterop with their existing provenance contract.
 
 Generation reuses a host-side cache under the existing output-adjacent .tools
 directory. Identity covers actual game binary/metadata, Unity version and reference
@@ -47,6 +51,9 @@ chosen outputs. Completed outputs can open their containing directory.
 - Embedding the tool in each EXE hides its directory but requires extracting its
   multi-file managed dependency graph and adds startup/publication complexity.
   Adjacent Tools has a predictable explicit lifetime and satisfies portability.
+- Bundling GUI native libraries further reduces visible files but requires a
+  persistent extraction directory. Bundling only managed dependencies reduces
+  the root file count without that extra disk footprint or startup work.
 - Reusing wrappers without checking inputs is faster but risks native ABI/type
   mismatch. Hashing host generation inputs is much cheaper than regenerating.
 - Removing all Interop normalization breaks custom older generators; retain only
@@ -58,7 +65,10 @@ chosen outputs. Completed outputs can open their containing directory.
 
 GUI/CLI package names change; downloads select a front end. The required .NET
 runtime remains external. Duplicate tools increase total asset storage, while
-individual CLI downloads no longer include GUI dependencies. Generation caches
+individual CLI downloads no longer include GUI dependencies.
+GUI managed DLLs no longer clutter the executable directory; the executable
+grows by the bundled content and its native graphics files remain required.
+Historical generation caches
 consume disk and can be deleted to reclaim space; no automatic retention policy
 or installed-file diagnostic inventory is introduced. Cached content is verified
 before reuse; concurrent external writers are outside the single-writer contract.
