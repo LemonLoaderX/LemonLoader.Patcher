@@ -1,15 +1,11 @@
-using System.Globalization;
 using System.IO.Compression;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 internal sealed record PayloadSource(
     string ReleaseRoot,
     string InteropRoot,
     string? DeploymentPath,
-    DeploymentPolicyOptions DeploymentPolicies,
-    IReadOnlyDictionary<string, (long Size, string Hash)> VerifiedReleaseFiles);
+    DeploymentPolicyOptions DeploymentPolicies);
 
 internal static class PayloadAssembler
 {
@@ -27,10 +23,8 @@ internal static class PayloadAssembler
             PayloadEntry));
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Update);
         ValidateUniqueEntries(archive);
-        ValidatePrivateNativeLibraries(archive, payload.PrivateNativeLibraries);
         RejectExistingLoaderPayload(archive);
         AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets");
-        var coreClrCryptoDexHash = AddCoreClrCryptoDex(archive, source, payload);
         ValidateRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"));
         foreach (var dll in Directory.GetFiles(source.InteropRoot, "*.dll"))
@@ -40,21 +34,13 @@ internal static class PayloadAssembler
                 dll,
                 $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}");
         }
-        if (payload.FormatVersion == AndroidPayloadContract.LegacyFormatVersion)
-        {
-            var interopManifest = Path.Combine(source.InteropRoot, InteropGenerationManifest.FileName);
-            RequireFile(interopManifest, "Interop generation manifest");
-            AddFile(archive, interopManifest,
-                $"{AndroidPayloadContract.InteropRoot}/{InteropGenerationManifest.FileName}");
-        }
         if (source.DeploymentPath is not null)
             AddDeploymentRoot(archive, source.DeploymentPath);
         ValidateDeploymentEntries(archive);
         RefreshPayloadDescriptor(
             archive,
             payload,
-            source.DeploymentPolicies,
-            coreClrCryptoDexHash);
+            source.DeploymentPolicies);
         ValidateUniqueEntries(archive);
     }
 
@@ -107,18 +93,6 @@ internal static class PayloadAssembler
         }
     }
 
-    internal static string ComputeDeploymentRevision(
-        IReadOnlyList<DeploymentFileDescriptor> files)
-    {
-        var lines = new List<string>(files.Count + 1) { "deployment-revision=1" };
-        lines.AddRange(files
-            .OrderBy(file => file.Path, StringComparer.Ordinal)
-            .Select(file => $"{file.Path}|{file.Size}|{file.Sha256}|{file.Policy}"));
-        return Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(string.Join('\n', lines))))
-            .ToLowerInvariant();
-    }
-
     private static IReadOnlySet<string> CreateDirectorySeedApk(
         string gameRoot,
         string apkPath)
@@ -129,45 +103,10 @@ internal static class PayloadAssembler
         var entryNames = Directory.GetFiles(nativeRoot, "*", SearchOption.TopDirectoryOnly)
             .Select(path => $"{GamePackageLayout.Arm64LibraryRoot}/{Path.GetFileName(path)}")
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var dexPath in Directory.GetFiles(gameRoot, "classes*.dex", SearchOption.TopDirectoryOnly))
-            entryNames.Add(Path.GetFileName(dexPath));
-        AddDecodedDexEntries(gameRoot, entryNames);
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Create);
         foreach (var entryName in entryNames.OrderBy(name => name, StringComparer.Ordinal))
             archive.CreateEntry(entryName, CompressionLevel.NoCompression);
         return entryNames;
-    }
-
-    private static void AddDecodedDexEntries(string gameRoot, ISet<string> entryNames)
-    {
-        const string secondaryPrefix = "smali_classes";
-        foreach (var directory in Directory.GetDirectories(
-                     gameRoot,
-                     "*",
-                     SearchOption.TopDirectoryOnly))
-        {
-            var name = Path.GetFileName(directory);
-            if (string.Equals(name, "smali", StringComparison.Ordinal))
-            {
-                entryNames.Add("classes.dex");
-                continue;
-            }
-            if (!name.StartsWith(secondaryPrefix, StringComparison.Ordinal))
-                continue;
-
-            var suffix = name[secondaryPrefix.Length..];
-            if (suffix.Length == 0 || suffix[0] == '0' ||
-                !int.TryParse(
-                    suffix,
-                    NumberStyles.None,
-                    CultureInfo.InvariantCulture,
-                    out var index) ||
-                index < 2)
-            {
-                continue;
-            }
-            entryNames.Add($"classes{index}.dex");
-        }
     }
 
     private static void ExtractDirectoryOverlay(
@@ -201,166 +140,42 @@ internal static class PayloadAssembler
     private static void RefreshPayloadDescriptor(
         ZipArchive archive,
         PayloadDescriptor descriptor,
-        DeploymentPolicyOptions deploymentPolicies,
-        string? coreClrCryptoDexHash)
-    {
-        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
-        {
-            const string prefix = AndroidPayloadContract.DeploymentRoot + "/";
-            var paths = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) &&
-                    entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
-                .Select(entry => entry.FullName[prefix.Length..]).Order(StringComparer.Ordinal).ToArray();
-            deploymentPolicies.ValidateRuleCoverage(paths);
-            var policies = paths.Select(path => new
-            {
-                path,
-                policy = DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path))
-            }).Where(file => file.policy != "seed").ToArray();
-            archive.GetEntry(PayloadEntry)?.Delete();
-            var entry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
-            using var configurationOutput = entry.Open();
-            JsonSerializer.Serialize(configurationOutput, new
-            {
-                formatVersion = AndroidPayloadContract.FormatVersion,
-                runtimeRid = descriptor.RuntimeRid,
-                deploymentFiles = policies
-            }, PayloadJsonOptions);
-            return;
-        }
-        var deploymentFiles = BuildDeploymentFileDescriptors(archive, deploymentPolicies);
-        deploymentPolicies.ValidateRuleCoverage(deploymentFiles.Select(file => file.Path));
-        var updated = descriptor with
-        {
-            LoaderSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/loader"),
-            DotnetSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/dotnet"),
-            InteropSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "runtime/interop"),
-            DeploymentSha256 = AndroidPayloadContract.ComputeTreeHash(archive, "deployment"),
-            DeploymentProfile = deploymentPolicies.Profile.ToString().ToLowerInvariant(),
-            DeploymentRevisionSha256 = ComputeDeploymentRevision(deploymentFiles),
-            DeploymentFiles = deploymentFiles,
-            CoreClrCryptoDexSha256 = coreClrCryptoDexHash
-        };
-        archive.GetEntry(PayloadEntry)?.Delete();
-        var manifestEntry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
-        using var output = manifestEntry.Open();
-        JsonSerializer.Serialize(output, updated, PayloadJsonOptions);
-    }
-
-    private static IReadOnlyList<DeploymentFileDescriptor> BuildDeploymentFileDescriptors(
-        ZipArchive archive,
         DeploymentPolicyOptions deploymentPolicies)
     {
         const string prefix = AndroidPayloadContract.DeploymentRoot + "/";
-        return archive.Entries
-            .Where(entry =>
-                !string.IsNullOrEmpty(entry.Name) &&
+        var paths = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) &&
                 entry.FullName.StartsWith(prefix, StringComparison.Ordinal))
-            .OrderBy(entry => entry.FullName, StringComparer.Ordinal)
-            .Select(entry =>
-            {
-                long length = 0;
-                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                using var input = entry.Open();
-                var buffer = new byte[64 * 1024];
-                int bytesRead;
-                while ((bytesRead = input.Read(buffer, 0, buffer.Length)) != 0)
-                {
-                    hasher.AppendData(buffer, 0, bytesRead);
-                    length += bytesRead;
-                }
-                var path = entry.FullName[prefix.Length..];
-                return new DeploymentFileDescriptor(
-                    path,
-                    length,
-                    Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant(),
-                    DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path)));
-            })
-            .ToArray();
+            .Select(entry => entry.FullName[prefix.Length..]).Order(StringComparer.Ordinal).ToArray();
+        deploymentPolicies.ValidateRuleCoverage(paths);
+        var policies = paths.Select(path => new
+        {
+            path,
+            policy = DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path))
+        }).Where(file => file.policy != "seed").ToArray();
+        archive.GetEntry(PayloadEntry)?.Delete();
+        var entry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
+        using var output = entry.Open();
+        JsonSerializer.Serialize(output, new
+        {
+            formatVersion = AndroidPayloadContract.FormatVersion,
+            runtimeRid = descriptor.RuntimeRid,
+            deploymentFiles = policies
+        }, PayloadJsonOptions);
     }
 
     private static PayloadDescriptor ReadPayloadDescriptor(string path)
     {
         RequireFile(path, "Android payload manifest");
         var descriptor = JsonSerializer.Deserialize<PayloadDescriptor>(
-            File.ReadAllText(path),
-            PayloadJsonOptions) ?? throw new InvalidDataException(
-                "Android payload manifest is empty.");
-        if (descriptor.FormatVersion is not (AndroidPayloadContract.FormatVersion or AndroidPayloadContract.LegacyFormatVersion))
-        {
+            File.ReadAllText(path), PayloadJsonOptions)
+            ?? throw new InvalidDataException("Android payload manifest is empty.");
+        if (descriptor.FormatVersion != AndroidPayloadContract.FormatVersion)
             throw new InvalidDataException(
-                $"Unsupported Android payload layout {descriptor.FormatVersion}; " +
-                $"expected {AndroidPayloadContract.LegacyFormatVersion} or {AndroidPayloadContract.FormatVersion}.");
-        }
-        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
-        {
-            if (descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
-                throw new InvalidDataException("Unsupported runtime RID.");
-            return descriptor with { PrivateNativeLibraries = [] };
-        }
-        if (descriptor.DeploymentFiles is null ||
-            descriptor.DeploymentProfile is null ||
-            descriptor.DeploymentRevisionSha256 is null ||
-            descriptor.ManagedRuntimeBackend is null ||
-            descriptor.ManagedRuntimeIdentitySha256 is null ||
-            descriptor.PrivateNativeLibraries is null)
-        {
-            throw new InvalidDataException(
-                "Android payload manifest does not define runtime identity or deployment policy metadata.");
-        }
-        var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
-            descriptor.ManagedRuntimeBackend);
-        if (descriptor.CoreClrCryptoDexMode is not null and not "embedded")
-            throw new InvalidDataException("Unsupported Android crypto DEX mode.");
-        if (descriptor.CoreClrCryptoDexMode == "embedded")
-        {
-            if (runtimeBackend != ManagedRuntimeBackend.CoreClr || descriptor.RuntimeRid != "android-arm64" ||
-                descriptor.ExperimentalRuntimeRid is not null || descriptor.MinimumAndroidApi < 26 ||
-                descriptor.CoreClrCryptoDexSha256 is not null || descriptor.CoreClrCryptoBootstrapSha256 is null ||
-                !IsSha256(descriptor.CoreClrCryptoBootstrapSha256))
-                throw new InvalidDataException("Invalid embedded crypto payload metadata.");
-        }
-        else if (descriptor.CoreClrCryptoBootstrapSha256 is not null)
-            throw new InvalidDataException("An external crypto payload declares embedded bootstrap metadata.");
-        if (!IsSha256(descriptor.ManagedRuntimeIdentitySha256))
-            throw new InvalidDataException(
-                "Android payload manifest contains an invalid managed runtime identity hash.");
-        if (descriptor.CoreClrCryptoDexSha256 is not null &&
-            !IsSha256(descriptor.CoreClrCryptoDexSha256))
-        {
-            throw new InvalidDataException(
-                "Android payload manifest contains an invalid crypto helper dex hash.");
-        }
-        if (descriptor.RuntimeRid is not null && descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
+                $"Unsupported Android payload layout {descriptor.FormatVersion}; expected {AndroidPayloadContract.FormatVersion}.");
+        if (descriptor.RuntimeRid is not ("android-arm64" or "linux-bionic-arm64"))
             throw new InvalidDataException("Unsupported runtime RID.");
-        if (descriptor.RuntimeRid == "linux-bionic-arm64" &&
-            (runtimeBackend != ManagedRuntimeBackend.CoreClr ||
-             descriptor.CoreClrCryptoDexSha256 is not null))
-            throw new InvalidDataException("Invalid Bionic cryptography metadata.");
-        if (descriptor.ExperimentalRuntimeRid is not null &&
-            (descriptor.ExperimentalRuntimeRid != "linux-bionic-arm64" ||
-             runtimeBackend != ManagedRuntimeBackend.CoreClr ||
-             descriptor.CoreClrCryptoDexSha256 is not null))
-            throw new InvalidDataException("Invalid experimental runtime payload metadata.");
-        if (runtimeBackend == ManagedRuntimeBackend.MonoVmSgen &&
-            descriptor.CoreClrCryptoDexSha256 is not null)
-        {
-            throw new InvalidDataException(
-                "Android MonoVM/SGen payload manifest declares a CoreCLR crypto helper dex.");
-        }
-        if (descriptor.PrivateNativeLibraries.Any(name =>
-                string.IsNullOrWhiteSpace(name) ||
-                name.Contains('/') ||
-                name.Contains('\\') ||
-                !name.EndsWith(".so", StringComparison.Ordinal)))
-        {
-            throw new InvalidDataException(
-                "Android payload manifest contains an invalid private native library name.");
-        }
         return descriptor;
     }
-
-    private static bool IsSha256(string value) =>
-        value.Length == 64 && value.All(Uri.IsHexDigit);
 
     private static void ValidateUniqueEntries(ZipArchive archive)
     {
@@ -421,23 +236,6 @@ internal static class PayloadAssembler
         }
     }
 
-    private static void ValidatePrivateNativeLibraries(
-        ZipArchive archive,
-        IReadOnlyList<string> privateNativeLibraries)
-    {
-        foreach (var library in privateNativeLibraries)
-        {
-            var publicEntry = $"{GamePackageLayout.Arm64LibraryRoot}/{library}";
-            if (archive.GetEntry(publicEntry) is not null)
-            {
-                throw new InvalidDataException(
-                    $"The input contains '{publicEntry}', which conflicts with LemonLoader's " +
-                    "private .NET native dependency. This input cannot be patched without " +
-                    "isolating that dependency first.");
-            }
-        }
-    }
-
     private static void RejectExistingLoaderPayload(ZipArchive archive)
     {
         var existing = archive.Entries.FirstOrDefault(entry =>
@@ -494,79 +292,6 @@ internal static class PayloadAssembler
                 name,
                 replaceExisting: name == GamePackageLayout.MainLibrary);
         }
-    }
-
-    private static string? AddCoreClrCryptoDex(
-        ZipArchive archive,
-        PayloadSource source,
-        PayloadDescriptor descriptor)
-    {
-        // Layout 9 releases are validated active CoreCLR inputs with no external DEX.
-        if (descriptor.FormatVersion == AndroidPayloadContract.FormatVersion)
-            return null;
-        var runtimeBackend = AndroidPayloadContract.ParseManagedRuntimeBackend(
-            descriptor.ManagedRuntimeBackend);
-        var isBionic = descriptor.RuntimeRid == "linux-bionic-arm64" ||
-            descriptor.ExperimentalRuntimeRid == "linux-bionic-arm64";
-        if (runtimeBackend != ManagedRuntimeBackend.CoreClr || isBionic)
-            return null;
-
-        if (descriptor.CoreClrCryptoDexMode == "embedded")
-        {
-            if (!source.VerifiedReleaseFiles.TryGetValue("lib/arm64-v8a/libmain.so", out var bootstrap) ||
-                descriptor.CoreClrCryptoBootstrapSha256 != bootstrap.Hash)
-                throw new InvalidDataException("Embedded crypto bootstrap does not match the verified Release.");
-            return null;
-        }
-
-        var cryptoDex = GamePackageLayout.FilePath(
-            source.ReleaseRoot,
-            AndroidPayloadContract.CoreClrCryptoDexReleasePath);
-        RequireFile(cryptoDex, "Android CoreCLR crypto helper dex");
-        if (!source.VerifiedReleaseFiles.TryGetValue(
-                AndroidPayloadContract.CoreClrCryptoDexReleasePath,
-                out var verifiedCryptoDex))
-        {
-            throw new InvalidDataException(
-                "The validated Android CoreCLR Release has no crypto helper dex digest.");
-        }
-        if (descriptor.CoreClrCryptoDexSha256 is not null &&
-            !string.Equals(
-                verifiedCryptoDex.Hash,
-                descriptor.CoreClrCryptoDexSha256,
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException(
-                "The Android CoreCLR crypto helper dex does not match payload.json.");
-        }
-
-        var dexIndices = archive.Entries
-            .Where(entry => !entry.FullName.Contains('/'))
-            .Select(entry => ParseDexIndex(entry.FullName))
-            .Where(index => index is not null)
-            .Select(index => index!.Value)
-            .ToArray();
-        if (!dexIndices.Contains(1))
-        {
-            throw new InvalidDataException(
-                "The input Android package has no primary classes.dex for the CoreCLR crypto bridge.");
-        }
-        var nextIndex = checked(dexIndices.Max() + 1);
-        AddFile(archive, cryptoDex, $"classes{nextIndex}.dex");
-        return verifiedCryptoDex.Hash;
-    }
-
-    private static int? ParseDexIndex(string entryName)
-    {
-        if (entryName == "classes.dex")
-            return 1;
-        if (!entryName.StartsWith("classes", StringComparison.Ordinal) ||
-            !entryName.EndsWith(".dex", StringComparison.Ordinal))
-        {
-            return null;
-        }
-        var value = entryName["classes".Length..(entryName.Length - ".dex".Length)];
-        return int.TryParse(value, out var index) && index >= 2 ? index : null;
     }
 
     private static void AddDeploymentRoot(ZipArchive archive, string sourcePath)
@@ -638,28 +363,5 @@ internal static class PayloadAssembler
     private static StringComparison PathComparison =>
         OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    private sealed record PayloadDescriptor(
-        int FormatVersion,
-        string ManagedRuntimeBackend,
-        string ManagedRuntimeIdentitySha256,
-        string? CoreClrCryptoDexSha256,
-        string LoaderSha256,
-        string DotnetSha256,
-        string InteropSha256,
-        string DeploymentSha256,
-        string DeploymentProfile,
-        string DeploymentRevisionSha256,
-        IReadOnlyList<DeploymentFileDescriptor> DeploymentFiles,
-        IReadOnlyList<string> PrivateNativeLibraries,
-        string? ExperimentalRuntimeRid = null,
-        string? RuntimeRid = null,
-        string? CoreClrCryptoDexMode = null,
-        string? CoreClrCryptoBootstrapSha256 = null,
-        int MinimumAndroidApi = 0);
-
-    internal sealed record DeploymentFileDescriptor(
-        string Path,
-        long Size,
-        string Sha256,
-        string Policy);
+    private sealed record PayloadDescriptor(int FormatVersion, string RuntimeRid);
 }

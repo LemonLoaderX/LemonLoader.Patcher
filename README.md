@@ -25,14 +25,11 @@ DEX. This support does not qualify a development runtime for public release.
 Active Android source builds embed crypto helper DEX bytes in `libmain.so` and
 require API 26+. Releases explicitly declaring `coreClrCryptoDexMode: embedded`
 are patched without adding a `classesN.dex`; Release file validation protects
-the bootstrap. Older Releases retain the promoted-DEX path. The new Loader needs a
+the bootstrap. Layout 8, external-DEX and MonoVM Releases are unsupported. The Loader needs a
 rebuilt matching runtime with explicit helper-ClassLoader initialization.
 
-For historical external-DEX Releases, including Loader v0.7.3-android.5 (Patcher
-1.1.0+), files[] protects the fixed-path helper DEX. Patcher promotes it to the
-next free classesN.dex and carries its verified digest into the legacy APK
-payload. Older declared coreClrCryptoDexSha256 fields remain checked. These
-compatibility steps do not apply to active embedded/layout-9 Releases.
+Use a current layout-9 Release. Historical releases require their corresponding
+historical tooling; current injection does not enumerate or rewrite game DEX.
 
 The released executable is `CLI/LemonLoader.Patcher.CLI.exe` on Windows and
 `CLI/LemonLoader.Patcher.CLI` on Linux. Run `patch --help` to show the command
@@ -126,10 +123,9 @@ CLI\LemonLoader.Patcher.CLI.exe patch UnpackedGame `
     --release LemonLoader-Android-arm64.zip
 ```
 
-Directory mode accepts raw `classes*.dex` files and apktool-decoded
-`smali`/`smali_classesN` source directories. Historical external-DEX CoreCLR
-Releases add their helper as the next unused DEX index without materializing
-synthetic source DEX files. Active embedded Releases add no DEX or smali tree.
+Directory mode preserves raw `classes*.dex` files and apktool-decoded
+`smali`/`smali_classesN` source directories. Injection adds no DEX or smali tree
+and does not require those files to be present in the working directory.
 
 Patch with Mods and persistent UserData using the `production` profile:
 
@@ -373,8 +369,8 @@ configuration: format version, runtime RID and optional non-seed path policies.
 They inject neither runtime identity JSON nor Interop generation manifests.
 Release/download validation still verifies individual files before injection.
 Native startup uses Android's APK update time for extraction caching, without
-installed-file scans. Older layout-8 Releases retain their original digest and
-external-DEX handling. Layout-9 Releases require a Patcher supporting layout 9;
+installed-file scans. Layout-8, external-DEX and MonoVM inputs are rejected.
+Layout-9 Releases require a Patcher supporting layout 9;
 historical Patchers reject the new layout. Validators tolerate additive
 JSON metadata and files instead of maintaining content blacklists. Android
 staging, rather than Patcher, decides whether desktop-only material is published.

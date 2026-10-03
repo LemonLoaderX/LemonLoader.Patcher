@@ -21,8 +21,7 @@ public static class RuntimeVariants
     internal static void ValidateManifest(JsonElement manifest, string variant)
     {
         var expected = Normalize(variant) == "bionic" ? "linux-bionic-arm64" : "android-arm64";
-        var actual = manifest.TryGetProperty("runtimeRid", out var rid) ? rid.GetString() :
-            manifest.TryGetProperty("experimentalRuntimeRid", out var oldRid) ? oldRid.GetString() : "android-arm64";
+        var actual = manifest.TryGetProperty("runtimeRid", out var rid) ? rid.GetString() : null;
         if (actual != expected)
             throw new InvalidDataException($"Selected runtime '{variant}' requires RID '{expected}', but the Release contains '{actual}'.");
     }

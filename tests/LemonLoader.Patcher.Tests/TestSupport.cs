@@ -18,8 +18,7 @@ internal static class TestSupport
                 releaseRoot,
                 interopRoot,
                 deploymentPath,
-                policies ?? DeploymentPolicyOptions.Create(null, []),
-                GetReleaseFileDigests(releaseRoot)));
+                policies ?? DeploymentPolicyOptions.Create(null, [])));
 
     public static void InjectDirectory(
         string gameRoot,
@@ -33,8 +32,7 @@ internal static class TestSupport
                 releaseRoot,
                 interopRoot,
                 deploymentPath,
-                policies ?? DeploymentPolicyOptions.Create(null, []),
-                GetReleaseFileDigests(releaseRoot)),
+                policies ?? DeploymentPolicyOptions.Create(null, [])),
             null);
 
     public static byte[] CreateUnityArchive()
@@ -53,70 +51,53 @@ internal static class TestSupport
         return output.ToArray();
     }
 
-    public static string CreateReleaseTree(
-        string root,
-        IReadOnlyList<string>? privateNativeLibraries = null,
-        bool includeCoreClrCryptoDex = false)
+    public static string CreateReleaseTree(string root, string rid = "android-arm64")
     {
         var releaseRoot = Path.Combine(root, $"release-{Guid.NewGuid():N}");
-        var runtimeBackend = includeCoreClrCryptoDex ? "coreclr" : "monovm-sgen";
         WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
-        WritePayload(
-            releaseRoot,
-            "assets/LemonLoader/runtime/loader/net6/MelonLoader.dll",
-            "loader");
-        WritePayload(
-            releaseRoot,
-            "assets/LemonLoader/runtime/dotnet/host/fxr/10.0.10/libhostfxr.so",
-            "hostfxr");
-        var runtimeEngineHash = WritePayload(
-            releaseRoot,
-            "assets/LemonLoader/runtime/dotnet/shared/Microsoft.NETCore.App/10.0.10/libcoreclr.so",
-            "coreclr").Hash;
-        var runtimeIdentity = WritePayload(
-            releaseRoot,
-            "assets/LemonLoader/runtime/dotnet/runtime-identity.json",
-            JsonSerializer.Serialize(new
-            {
-                formatVersion = 1,
-                runtimeVersion = "10.0.10",
-                backend = runtimeBackend,
-                hostingModel = includeCoreClrCryptoDex ? "coreclr-host-api" : "hostfxr",
-                engineFile = "libcoreclr.so",
-                engineSha256 = runtimeEngineHash
-            }));
-        if (includeCoreClrCryptoDex)
+        WritePayload(releaseRoot, $"{AndroidPayloadContract.LoaderRoot}/net6/MelonLoader.dll", "loader");
+        const string version = "11.0.0";
+        var shared = $"{AndroidPayloadContract.DotnetRoot}/shared/Microsoft.NETCore.App/{version}";
+        foreach (var name in new[] { "libcoreclr.so", "libclrjit.so", "System.Private.CoreLib.dll" })
+            WritePayload(releaseRoot, $"{shared}/{name}", name);
+        if (rid == "linux-bionic-arm64")
         {
-            WritePayload(
-                releaseRoot,
-                AndroidPayloadContract.CoreClrCryptoDexReleasePath,
-                "crypto-dex");
+            foreach (var name in new[] { "libSystem.Security.Cryptography.Native.OpenSsl.so", "libssl.so", "libcrypto.so" })
+                WritePayload(releaseRoot, $"{shared}/{name}", name);
+            WritePayload(releaseRoot, "licenses/OpenSSL/LICENSE.txt", "license");
         }
-        foreach (var library in privateNativeLibraries ?? [])
+        else
+            WritePayload(releaseRoot, $"{shared}/libSystem.Security.Cryptography.Native.Android.so", "android-crypto");
+        WritePayload(releaseRoot, AndroidPayloadContract.PayloadManifestPath,
+            JsonSerializer.Serialize(new { formatVersion = 9, runtimeRid = rid }));
+        var manifest = new Dictionary<string, object>
         {
-            WritePayload(
-                releaseRoot,
-                $"assets/LemonLoader/runtime/dotnet/native/openssl/{library}",
-                $"private-{library}");
-        }
-        WritePayload(
-            releaseRoot,
-            "assets/LemonLoader/payload.json",
-            JsonSerializer.Serialize(new Dictionary<string, object>
-            {
-                ["formatVersion"] = AndroidPayloadContract.LegacyFormatVersion,
-                ["loaderSha256"] = new string('0', 64),
-                ["dotnetSha256"] = new string('0', 64),
-                ["interopSha256"] = new string('0', 64),
-                ["deploymentSha256"] = new string('0', 64),
-                ["managedRuntimeBackend"] = runtimeBackend,
-                ["managedRuntimeIdentitySha256"] = runtimeIdentity.Hash,
-                ["deploymentProfile"] = "development",
-                ["deploymentRevisionSha256"] = ComputeDeploymentRevision([]),
-                ["deploymentFiles"] = Array.Empty<object>(),
-                ["privateNativeLibraries"] = privateNativeLibraries ?? []
-            }));
+            ["formatVersion"] = 2,
+            ["assetLayoutVersion"] = 9,
+            ["configuration"] = "Release",
+            ["gameAssembliesIncluded"] = false,
+            ["managedRuntimeVersion"] = version,
+            ["managedRuntimeBackend"] = "coreclr",
+            ["managedRuntimeSourceRevision"] = new string('2', 40),
+            ["managedRuntimeEngineFile"] = "libcoreclr.so",
+            ["managedRuntimeEngineSha256"] = GetReleaseFileDigests(releaseRoot)[$"{shared}/libcoreclr.so"].Hash,
+            ["runtimeRid"] = rid,
+            ["minimumAndroidApi"] = 26
+        };
+        if (rid == "android-arm64") manifest["coreClrCryptoDexMode"] = "embedded";
+        File.WriteAllText(Path.Combine(releaseRoot, "lemonloader-release.json"), JsonSerializer.Serialize(manifest));
+        RefreshReleaseInventory(releaseRoot);
         return releaseRoot;
+    }
+
+    public static void RefreshReleaseInventory(string root)
+    {
+        var path = Path.Combine(root, "lemonloader-release.json");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!;
+        manifest["files"] = JsonSerializer.SerializeToNode(GetReleaseFileDigests(root)
+            .Where(file => file.Key != "lemonloader-release.json")
+            .Select(file => new { path = file.Key, size = file.Value.Size, sha256 = file.Value.Hash }).ToArray());
+        File.WriteAllText(path, manifest.ToJsonString());
     }
 
     public static string CreateInteropTree(string root)
@@ -151,67 +132,6 @@ internal static class TestSupport
             throw new InvalidOperationException($"Missing ZIP entry '{name}'."),
             Encoding.UTF8);
         return reader.ReadToEnd();
-    }
-
-    public static string ComputePayloadHash(ZipArchive archive, string scope)
-    {
-        var lines = new List<string>
-        {
-            $"layout-version={AndroidPayloadContract.LegacyFormatVersion}",
-            $"scope={scope}"
-        };
-        foreach (var entry in archive.Entries
-                     .Where(entry =>
-                         !string.IsNullOrEmpty(entry.Name) &&
-                         entry.FullName.StartsWith(
-                             $"assets/LemonLoader/{scope}/",
-                             StringComparison.Ordinal))
-                     .OrderBy(entry => entry.FullName, StringComparer.Ordinal))
-        {
-            using var input = entry.Open();
-            var hash = Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-            lines.Add(
-                $"{entry.FullName["assets/LemonLoader/".Length..]}|{entry.Length}|{hash}");
-        }
-        return HashLines(lines);
-    }
-
-    public static string ComputePayloadDirectoryHash(string releaseRoot, string scope)
-    {
-        var payloadRoot = Path.Combine(releaseRoot, "assets", "LemonLoader");
-        var scopeRoot = Path.Combine(payloadRoot, scope);
-        var files = Directory.Exists(scopeRoot)
-            ? Directory.EnumerateFiles(scopeRoot, "*", SearchOption.AllDirectories)
-            : [];
-        var lines = new List<string>
-        {
-            $"layout-version={AndroidPayloadContract.LegacyFormatVersion}",
-            $"scope={scope}"
-        };
-        foreach (var path in files.OrderBy(
-                     path => Path.GetRelativePath(payloadRoot, path).Replace('\\', '/'),
-                     StringComparer.Ordinal))
-        {
-            using var input = File.OpenRead(path);
-            var relativePath = Path.GetRelativePath(payloadRoot, path).Replace('\\', '/');
-            lines.Add(
-                $"{relativePath}|{input.Length}|" +
-                Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant());
-        }
-        return HashLines(lines);
-    }
-
-    public static string ComputeDeploymentRevision(IEnumerable<JsonElement> files)
-    {
-        var lines = new List<string> { "deployment-revision=1" };
-        lines.AddRange(files
-            .OrderBy(file => file.GetProperty("path").GetString(), StringComparer.Ordinal)
-            .Select(file =>
-                $"{file.GetProperty("path").GetString()}|" +
-                $"{file.GetProperty("size").GetInt64()}|" +
-                $"{file.GetProperty("sha256").GetString()}|" +
-                file.GetProperty("policy").GetString()));
-        return HashLines(lines);
     }
 
     public static HttpResponseMessage ZipResponse(byte[] archive) => new(HttpStatusCode.OK)
@@ -297,10 +217,6 @@ internal static class TestSupport
         throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 
-    private static string HashLines(IEnumerable<string> lines) =>
-        Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(string.Join('\n', lines))))
-            .ToLowerInvariant();
 }
 
 internal sealed class DelegateHandler(

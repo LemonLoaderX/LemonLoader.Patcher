@@ -37,8 +37,7 @@ public sealed class ApkPatchPipeline
                 release.ReleaseRoot,
                 generatedInterop.DirectoryPath,
                 request.DeploymentPath,
-                request.DeploymentPolicies,
-                release.VerifiedFiles);
+                request.DeploymentPolicies);
 
             if (request.InputKind == PatchInputKind.Directory)
             {
