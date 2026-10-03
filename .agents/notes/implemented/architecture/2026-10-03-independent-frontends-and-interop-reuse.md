@@ -2,6 +2,10 @@
 
 Status: implemented
 
+The Interop-cache decision below is superseded by
+[Patcher-owned downloads without Interop caching](2026-10-03-patcher-owned-downloads.md).
+Independent archives, generator normalization and bounded GUI logs remain current.
+
 ## Problem
 
 Published CLI/GUI directories depend on a shared parent Tools directory, so moving
@@ -60,8 +64,9 @@ or installed-file diagnostic inventory is introduced. Cached content is verified
 before reuse; concurrent external writers are outside the single-writer contract.
 
 Packaging fixtures verify all four deterministic archives and executable modes.
-Core fixtures cover cached identity, corruption, unlisted/unsafe names and
-cancellation. Actual relocation checks must run generation, not just --version.
+Historical cache fixtures covered identity, corruption, unlisted/unsafe names and
+cancellation; they retire with that cache. Actual relocation checks must run
+generation, not just --version.
 GUI output suggestions, final statuses, log flooding and minimum-size rendering
 need front-end tests in addition to shared Core regressions.
 

@@ -185,8 +185,6 @@
                 </Grid>
               </Expander>
 
-              <CheckBox x:Name="ForceInteropGeneration" Content="Regenerate Interop" />
-
               <Expander x:Name="PostProcessingSection" Header="APK post-processing" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
                 <StackPanel Margin="16,12,16,16" Spacing="10">

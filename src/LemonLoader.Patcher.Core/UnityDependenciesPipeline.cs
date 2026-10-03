@@ -3,6 +3,9 @@ public sealed record UnityDependenciesRequest
     public required string UnityVersion { get; init; }
     public required string OutputPath { get; init; }
     public string? CachePath { get; init; }
+    internal string CacheRoot => string.IsNullOrWhiteSpace(CachePath)
+        ? ToolCachePaths.UnityDependencies
+        : Path.GetFullPath(CachePath);
 }
 
 public sealed record UnityDependenciesResult(
@@ -24,10 +27,7 @@ public static class UnityDependenciesPipeline
             throw new ArgumentException("Output directory is required.");
 
         var outputPath = Path.GetFullPath(request.OutputPath);
-        var outputParent = Path.GetDirectoryName(outputPath) ?? outputPath;
-        var cachePath = string.IsNullOrWhiteSpace(request.CachePath)
-            ? Path.Combine(outputParent, ".tools", "UnityDependencies")
-            : Path.GetFullPath(request.CachePath);
+        var cachePath = request.CacheRoot;
         if (ContainsPath(outputPath, cachePath) || ContainsPath(cachePath, outputPath))
         {
             throw new ArgumentException(

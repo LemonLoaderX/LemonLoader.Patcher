@@ -12,8 +12,7 @@ internal static class InteropGenerationManifest
         UnityDependenciesResolution unityDependencies,
         string cpp2IlPath,
         string cpp2IlVersion,
-        InteropGeneratorTool il2CppInterop,
-        string? cacheKey = null)
+        InteropGeneratorTool il2CppInterop)
     {
         var assemblies = Directory.GetFiles(outputDirectory, "*.dll", SearchOption.TopDirectoryOnly)
             .OrderBy(path => path, StringComparer.Ordinal)
@@ -25,7 +24,6 @@ internal static class InteropGenerationManifest
         var manifest = new
         {
             formatVersion = 1,
-            cacheKey,
             generatedAtUtc = DateTimeOffset.UtcNow,
             unityVersion,
             unityDependencies = new

@@ -42,6 +42,16 @@ if (args is ["--spawn-output-holder", var childFile])
     using var child = Process.Start(SelfStartInfo("--hold-output", childFile));
     return;
 }
+if (args is ["--terminal-output"])
+{
+    Console.OutputEncoding = Encoding.UTF8;
+    Console.WriteLine("\u001b[32mGenerated assemblies\u001b[0m\u001b[K");
+    Console.WriteLine("\u001b]8;;https://example.invalid\u0007link\u001b]8;;\u001b\\");
+    Console.WriteLine("\u001b[38;2;255;128;0mRGB output\u001b[0m");
+    Console.Error.WriteLine("\u009b33mwarning\u009b0m");
+    Console.Error.WriteLine("\u001b[?25l\u001b[2K\u001b[?25h");
+    return;
+}
 
 var apkVerificationScript = args is ["--verify-apk-script", var script] ? Path.GetFullPath(script) : null;
 var tests = new (string Name, Func<Task> Run)[]
@@ -52,7 +62,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
-    ("Interop cache identity and corruption", InteropCacheTests.RunAsync),
+    ("Application-owned tool cache", TestToolCachePathsAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("Retired payload rejection", () => TestRetiredPayloadAsync(apkVerificationScript)),
     ("Minimal layout 9 payload", () => TestMinimalPayloadAsync(apkVerificationScript)),
@@ -67,7 +77,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("External Android tool resolution", TestExternalToolResolutionAsync),
     ("CLI contract", TestCliContractAsync),
     ("Directory replacement", TestDirectoryReplacementAsync),
-    ("External tool output drain cancellation", TestOutputDrainCancellationAsync)
+    ("External tool output drain cancellation", TestOutputDrainCancellationAsync),
+    ("External tool plain-text output", TestTerminalOutputAsync)
 };
 
 foreach (var test in tests)
@@ -86,6 +97,44 @@ static ProcessStartInfo SelfStartInfo(params string[] arguments)
         info.ArgumentList.Add(typeof(TestSupport).Assembly.Location);
     foreach (var argument in arguments) info.ArgumentList.Add(argument);
     return info;
+}
+
+static async Task TestTerminalOutputAsync()
+{
+    var messages = new System.Collections.Concurrent.ConcurrentQueue<PatcherMessage>();
+    var progress = new ToolOutputProgress(messages);
+    var info = SelfStartInfo("--terminal-output");
+    await ProcessRunner.RunAsync(info.FileName, progress, CancellationToken.None, info.ArgumentList.ToArray());
+    var output = messages.Where(message => message.Kind == PatcherMessageKind.ToolOutput)
+        .Select(message => message.Text).Order(StringComparer.Ordinal).ToArray();
+    AssertTrue(output.SequenceEqual(new[] { "Generated assemblies", "RGB output", "link", "warning" }),
+        "Terminal control sequences leaked into tool log: " + string.Join(" | ", output));
+}
+
+static Task TestToolCachePathsAsync()
+{
+    var root = Path.Combine(AppContext.BaseDirectory, ".tools");
+    var first = new PatchRequest { InputPath = "one/game.apk", OutputPath = "one/output.apk" };
+    var second = new PatchRequest { InputPath = "two/game.apk", OutputPath = "elsewhere/output.apk" };
+    var directory = new PatchRequest { InputPath = "unpacked/game" };
+    foreach (var request in new[] { first, second, directory })
+        AssertEqual(root, request.ToolCacheRoot);
+    var unity = new UnityDependenciesRequest { UnityVersion = "2021.3.0f1", OutputPath = "exports/unity" };
+    AssertEqual(Path.Combine(root, "UnityDependencies"), unity.CacheRoot);
+    AssertEqual(Path.GetFullPath("explicit-cache"), (unity with { CachePath = "explicit-cache" }).CacheRoot);
+    var fixture = CreateTestRoot();
+    try
+    {
+        var input = Path.Combine(fixture, "game.apk");
+        File.WriteAllText(input, "fixture");
+        AssertThrows<ArgumentException>(() => new PatchRequest
+        {
+            InputPath = input, OutputPath = Path.Combine(fixture, "output.apk"),
+            InteropOutputPath = Path.Combine(root, "destructive-export")
+        }.NormalizeAndValidate());
+    }
+    finally { Directory.Delete(fixture, true); }
+    return Task.CompletedTask;
 }
 
 static async Task TestOutputDrainCancellationAsync()
@@ -262,6 +311,7 @@ static Task TestInteropGeneratorOverrideAsync()
 
         using var document = JsonDocument.Parse(File.ReadAllText(
             Path.Combine(output, InteropGenerationManifest.FileName)));
+        AssertTrue(!document.RootElement.TryGetProperty("cacheKey", out _), "Interop export retains a removed cache identity.");
         var tools = document.RootElement.GetProperty("tools");
         AssertEqual("override", tools.GetProperty("il2CppInteropSource").GetString());
         AssertEqual(tool.Version, tools.GetProperty("il2CppInteropVersion").GetString());

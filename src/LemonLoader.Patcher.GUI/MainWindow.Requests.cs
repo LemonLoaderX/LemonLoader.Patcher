@@ -36,7 +36,6 @@ public sealed partial class MainWindow
             GameAssemblyPath = Optional(GameAssemblyPath),
             MetadataPath = Optional(MetadataPath),
             InteropOutputPath = Optional(InteropOutputPath),
-            ForceInteropGeneration = ForceInteropGeneration.IsChecked == true,
             Cpp2IlPath = Optional(Cpp2IlPath),
             Il2CppInteropCliPath = Optional(Il2CppInteropCliPath),
             AlignApk = EnableAlignment.IsChecked == true,

@@ -24,7 +24,6 @@ public sealed record PatchRequest
     public string? UnityVersion { get; init; }
     public string? UnityLibrariesPath { get; init; }
     public string? InteropOutputPath { get; init; }
-    public bool ForceInteropGeneration { get; init; }
     public string? Cpp2IlPath { get; init; }
     public string? Il2CppInteropCliPath { get; init; }
     public bool AlignApk { get; init; }
@@ -33,14 +32,7 @@ public sealed record PatchRequest
     public SigningOptions? Signing { get; init; }
     internal PatchInputKind InputKind { get; init; }
 
-    internal string ToolCacheRoot
-    {
-        get
-        {
-            var anchor = OutputPath ?? InputPath;
-            return Path.Combine(Path.GetDirectoryName(anchor) ?? anchor, ".tools");
-        }
-    }
+    internal string ToolCacheRoot => ToolCachePaths.Root;
 
     internal ApkPostProcessingOptions PostProcessing => new(
         AlignApk,
@@ -153,7 +145,7 @@ public sealed record PatchRequest
             foreach (var input in inputs.OfType<string>())
             {
                 if (PathSafety.Contains(export, input) ||
-                    (Directory.Exists(input) && PathSafety.Contains(input, export)))
+                    ((input == normalized.ToolCacheRoot || Directory.Exists(input)) && PathSafety.Contains(input, export)))
                     throw new ArgumentException("Interop output must not overlap game, dependency, deployment or other input/output paths.");
             }
         }

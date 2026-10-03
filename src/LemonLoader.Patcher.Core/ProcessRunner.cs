@@ -1,6 +1,7 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
-internal static class ProcessRunner
+internal static partial class ProcessRunner
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
 
@@ -25,6 +26,8 @@ internal static class ProcessRunner
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
+        info.Environment["NO_COLOR"] = "1";
+        info.Environment["TERM"] = "dumb";
         if (environment is not null)
         {
             foreach (var pair in environment)
@@ -71,8 +74,12 @@ internal static class ProcessRunner
     {
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
+            line = TerminalControls().Replace(line, string.Empty);
             if (!string.IsNullOrWhiteSpace(line))
                 progress?.Report(new(PatcherMessageKind.ToolOutput, line));
         }
     }
+
+    [GeneratedRegex(@"(?:\x1B\[|\x9B)[0-?]*[ -/]*[@-~]|\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)|\x1B[@-_]")]
+    private static partial Regex TerminalControls();
 }

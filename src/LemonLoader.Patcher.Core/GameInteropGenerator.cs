@@ -126,20 +126,11 @@ internal sealed class GameInteropGenerator(
             cancellationToken);
         var unityDependencies = request.UnityLibrariesPath is null
             ? await UnityDependenciesResolver.ResolveAsync(
-                Path.Combine(request.ToolCacheRoot, "UnityDependencies"),
+                ToolCachePaths.UnityDependencies,
                 unityVersion,
                 progress,
                 cancellationToken)
             : UnityDependenciesResolver.UseLocal(request.UnityLibrariesPath, unityVersion);
-        var cacheKey = InteropGenerationCache.Key(inputRoot, unityVersion, unityDependencies, cpp2Il, interopTool);
-        var cache = Path.Combine(request.ToolCacheRoot, "Interop", cacheKey);
-        PathSafety.RejectLinks(cache);
-        if (!request.ForceInteropGeneration &&
-            InteropGenerationCache.TryRestore(cache, cacheKey, outputRoot, cancellationToken))
-        {
-            ReportStage("Reusing generated Interop assemblies");
-            return;
-        }
         var dummyRoot = Path.Combine(Path.GetDirectoryName(outputRoot)!, "cpp2il");
         Directory.CreateDirectory(dummyRoot);
         await ProcessRunner.RunAsync(
@@ -175,13 +166,7 @@ internal sealed class GameInteropGenerator(
             unityDependencies,
             cpp2Il,
             Cpp2IlResolver.Version,
-            interopTool,
-            cacheKey);
-        try { DirectoryPublisher.Replace(outputRoot, cache, progress, cancellationToken); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            progress?.Report(new(PatcherMessageKind.Warning, $"Could not cache generated Interop: {exception.Message}"));
-        }
+            interopTool);
     }
 
     private static void ValidateUnityLayout(bool hasMain, bool hasUnity, string description)

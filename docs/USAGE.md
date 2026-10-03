@@ -26,8 +26,16 @@ primary DEX files to be present.
 Patcher does not bundle a Loader archive. An omitted --release resolves the
 selected latest Loader distribution. Fully offline work requires a local Release,
 Unity references and the verified Cpp2IL tool already cached or explicitly supplied.
-Valid cached Releases are reused offline; remove the owned .tools runtime ZIP
-to request a newer download. Invalid caches are validated and replaced automatically.
+Cpp2IL, Unity references and Loader downloads stay in `.tools` beside the Patcher
+executable, independent of game/output paths and the current working directory.
+The Patcher directory must be writable for downloads; it does not fall back to
+creating caches beside games. Separate GUI/CLI installations own separate caches.
+Valid cached Releases are reused offline; remove the runtime ZIP from that
+directory to request a newer download. Invalid caches are validated and replaced
+automatically. Existing output-adjacent `.tools` directories are no longer read or
+written. To avoid downloading again, move their Cpp2IL, UnityDependencies and
+runtime ZIP entries into the executable's `.tools`; the normal validation remains.
+Old `Interop` cache entries can be deleted; they are no longer used.
 
 ## Deployment
 
@@ -78,7 +86,9 @@ Maintain the existing application/signing identity for replacement updates.
 
 ## Results
 
-Progress/tool output goes to stderr. Successful APK patch writes output, sha256
+Progress/tool output goes to stderr as plain text, with terminal control sequences
+removed. GUI display, copying and saving use the same plain tool output.
+Successful APK patch writes output, sha256
 and unity-version lines to stdout. Directory mode reports its modified input path
 and omits sha256. Exit codes: 0 success, 1 execution failure, 2 invalid usage,
 130 cancellation. --verbose adds exception details.

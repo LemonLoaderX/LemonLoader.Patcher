@@ -20,7 +20,7 @@ internal static class CliRequestParser
             args[1..],
             PatchValueOptions,
             ["--policy"],
-            ["--align", "--force-interop"]);
+            ["--align"]);
         try
         {
             return new PatchRequest
@@ -38,7 +38,6 @@ internal static class CliRequestParser
                 UnityVersion = parsed.Optional("--unity-version"),
                 UnityLibrariesPath = parsed.Optional("--unity-libraries"),
                 InteropOutputPath = parsed.Optional("--interop-output"),
-                ForceInteropGeneration = parsed.Has("--force-interop"),
                 Cpp2IlPath = parsed.Optional("--cpp2il"),
                 Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli"),
                 AlignApk = parsed.Has("--align"),

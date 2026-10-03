@@ -19,11 +19,9 @@ identity for diagnosis and Mod development; it is not injected into layout 9.
 The entire export directory is replaced. It must not overlap game, deployment,
 dependency or other input/output paths; linked destinations are rejected.
 
-Repeated patches reuse matching Interop below the existing output-adjacent
-`.tools/Interop` cache. Game binary/metadata, Unity references and generator tools
-must match; changed or incomplete cached DLLs regenerate. `--force-interop` or
-GUI's Regenerate Interop bypasses reuse. Delete that cache to reclaim disk space.
-Changing only Loader/runtime or deployment does not require new wrappers.
+Each patch generates Interop in a temporary workspace removed after the run.
+There is no persistent Interop cache. Only `--interop-output` retains an explicit
+export for Mod development.
 
 Packages bundle the generator built from Patcher's own Directory.Build.props pin.
 The net6 generator permits major runtime roll-forward to Patcher's required
@@ -34,7 +32,8 @@ pinned download. Use command help for all options.
 Unity reference restoration tries MelonLoader.UnityDependencies, then
 unity.bepinex.dev. Downloads/extracted assemblies are checked and recorded in
 lemonloader-unity-dependencies.json. unity-dependencies accepts --cache; its default
-is .tools/UnityDependencies beside output. Local references and cached/explicit
+is `.tools/UnityDependencies` beside the Patcher executable, shared with patching.
+Local references and cached/explicit
 Cpp2IL are necessary for offline generation.
 
 Loader owns [runtime ABI and standalone generation](https://github.com/LemonLoaderX/LemonLoader/blob/main/docs/android/INTEROP.md).
