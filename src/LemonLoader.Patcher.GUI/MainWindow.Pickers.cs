@@ -6,6 +6,7 @@ namespace LemonLoader.Patcher.GUI;
 
 public sealed partial class MainWindow
 {
+    private string? suggestedOutputPath;
     private async void BrowseFileClick(object? sender, RoutedEventArgs eventArgs)
     {
         if (sender is not Button { Tag: string targetName } ||
@@ -22,13 +23,6 @@ public sealed partial class MainWindow
         if (files.FirstOrDefault()?.TryGetLocalPath() is not { } path)
             return;
         target.Text = path;
-        if (targetName == nameof(InputPath) &&
-            string.IsNullOrWhiteSpace(OutputApkPath.Text))
-        {
-            OutputApkPath.Text = Path.Combine(
-                Path.GetDirectoryName(path)!,
-                $"{Path.GetFileNameWithoutExtension(path)}-lemonloader.apk");
-        }
     }
 
     private async void BrowseInputDirectoryClick(object? sender, RoutedEventArgs eventArgs)
@@ -90,7 +84,23 @@ public sealed partial class MainWindow
         OutputApkBrowseButton.IsEnabled = !directoryInput;
         PostProcessingSection.IsEnabled = !directoryInput;
         if (!directoryInput)
+        {
+            var input = InputPath.Text?.Trim();
+            if (!string.IsNullOrWhiteSpace(input) &&
+                Path.GetExtension(input).Equals(".apk", StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(OutputApkPath.Text) || OutputApkPath.Text == suggestedOutputPath))
+            {
+                try
+                {
+                    var fullPath = Path.GetFullPath(input);
+                    suggestedOutputPath = Path.Combine(Path.GetDirectoryName(fullPath)!,
+                        $"{Path.GetFileNameWithoutExtension(fullPath)}-lemonloader.apk");
+                    OutputApkPath.Text = suggestedOutputPath;
+                }
+                catch (Exception exception) when (exception is ArgumentException or NotSupportedException) { }
+            }
             return;
+        }
         OutputApkPath.Text = string.Empty;
         EnableAlignment.IsChecked = false;
         EnableSigning.IsChecked = false;

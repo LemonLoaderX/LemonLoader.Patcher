@@ -104,7 +104,7 @@
               <Expander Header="Interop overrides" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
                 <Grid Margin="16,12,16,16" ColumnDefinitions="*,*"
-                      RowDefinitions="Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
+                      RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="12" RowSpacing="10">
                   <StackPanel Spacing="4">
                     <TextBlock Text="Unity version" Classes="advanced-field-label" />
                     <TextBox x:Name="UnityVersion" Classes="single-line"
@@ -184,6 +184,8 @@
                   </StackPanel>
                 </Grid>
               </Expander>
+
+              <CheckBox x:Name="ForceInteropGeneration" Content="Regenerate Interop" />
 
               <Expander x:Name="PostProcessingSection" Header="APK post-processing" Classes="advanced"
                         IsExpanded="False" HorizontalAlignment="Stretch">
@@ -281,7 +283,7 @@
 
       <Border Grid.Column="1" Background="#202A33" Padding="18,16"
               BorderBrush="#11181E" BorderThickness="1,0,0,0">
-        <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12">
+        <Grid RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12">
           <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
             <Border Width="4" Height="34" Background="#38A174" CornerRadius="2" />
             <StackPanel Grid.Column="1" Spacing="2">
@@ -292,23 +294,39 @@
           </Grid>
           <ProgressBar x:Name="OperationProgress" Grid.Row="1" Height="3"
                        IsIndeterminate="True" IsVisible="False" />
-          <TextBox x:Name="OperationLog" Grid.Row="2" IsReadOnly="True"
-                   Classes="log-output"
-                   AcceptsReturn="True" TextWrapping="Wrap"
-                   FontFamily="Cascadia Mono, Consolas" FontSize="11"
-                   Watermark="Progress and tool output appear here." />
+          <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="6">
+            <CheckBox x:Name="AutoScroll" Content="Follow log" IsChecked="True"
+                      Foreground="#FFFFFF" FontSize="12" />
+            <TextBlock x:Name="ElapsedText" Grid.Column="1" Text="00:00:00"
+                       Foreground="#B8C5CE" VerticalAlignment="Center" FontSize="12" />
+            <Button Grid.Column="2" Click="CopyLogClick" Classes="log-tool" ToolTip.Tip="Copy task log"
+                    AutomationProperties.Name="Copy task log" Content="Copy" />
+            <Button Grid.Column="3" Click="SaveLogClick" Classes="log-tool" ToolTip.Tip="Save task log"
+                    AutomationProperties.Name="Save task log" Content="Save" />
+          </Grid>
+          <ListBox x:Name="OperationLog" Grid.Row="3" Classes="log-output" Background="Transparent"
+                   Foreground="#E1E6E9" FontFamily="Cascadia Mono, Consolas" FontSize="11"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <SelectableTextBlock Text="{Binding}" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
         </Grid>
       </Border>
     </Grid>
 
     <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#D9DEE2"
             BorderThickness="0,1,0,0" Padding="20,0">
-      <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+      <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="10">
         <TextBlock x:Name="ValidationText" VerticalAlignment="Center"
                    Foreground="#B13A3A" TextWrapping="Wrap" />
-        <Button x:Name="CancelButton" Grid.Column="1" Content="Cancel"
+        <Button x:Name="OpenResultButton" Grid.Column="1" Content="Open output"
+                IsEnabled="False" Click="OpenResultClick" />
+        <Button x:Name="CancelButton" Grid.Column="2" Content="Cancel"
                 IsEnabled="False" Click="CancelClick" />
-        <Button x:Name="RunButton" Grid.Column="2" Content="Patch"
+        <Button x:Name="RunButton" Grid.Column="3" Content="Patch"
                 Classes="primary" Click="RunClick" />
       </Grid>
     </Border>

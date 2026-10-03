@@ -131,6 +131,15 @@ internal sealed class GameInteropGenerator(
                 progress,
                 cancellationToken)
             : UnityDependenciesResolver.UseLocal(request.UnityLibrariesPath, unityVersion);
+        var cacheKey = InteropGenerationCache.Key(inputRoot, unityVersion, unityDependencies, cpp2Il, interopTool);
+        var cache = Path.Combine(request.ToolCacheRoot, "Interop", cacheKey);
+        PathSafety.RejectLinks(cache);
+        if (!request.ForceInteropGeneration &&
+            InteropGenerationCache.TryRestore(cache, cacheKey, outputRoot, cancellationToken))
+        {
+            ReportStage("Reusing generated Interop assemblies");
+            return;
+        }
         var dummyRoot = Path.Combine(Path.GetDirectoryName(outputRoot)!, "cpp2il");
         Directory.CreateDirectory(dummyRoot);
         await ProcessRunner.RunAsync(
@@ -155,7 +164,10 @@ internal sealed class GameInteropGenerator(
                 dummyRoot,
                 outputRoot,
                 unityDependencies.DirectoryPath));
-        NormalizeAssemblies(outputRoot);
+        // The pinned fork fixes orphan HasDefault flags while generating methods.
+        // Explicit older/custom generators still need the compatibility pass.
+        if (request.Il2CppInteropCliPath is not null)
+            NormalizeAssemblies(outputRoot);
         InteropGenerationManifest.Write(
             outputRoot,
             inputRoot,
@@ -163,7 +175,13 @@ internal sealed class GameInteropGenerator(
             unityDependencies,
             cpp2Il,
             Cpp2IlResolver.Version,
-            interopTool);
+            interopTool,
+            cacheKey);
+        try { DirectoryPublisher.Replace(outputRoot, cache, progress, cancellationToken); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            progress?.Report(new(PatcherMessageKind.Warning, $"Could not cache generated Interop: {exception.Message}"));
+        }
     }
 
     private static void ValidateUnityLayout(bool hasMain, bool hasUnity, string description)

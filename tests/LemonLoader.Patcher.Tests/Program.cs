@@ -52,6 +52,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Unity dependency source fallback", TestUnityDependencySourceFallbackAsync),
     ("Interop generator game assembly", TestInteropGeneratorGameAssemblyAsync),
     ("Interop generator override provenance", TestInteropGeneratorOverrideAsync),
+    ("Interop cache identity and corruption", InteropCacheTests.RunAsync),
     ("Release payload hash validation", TestReleaseValidationAsync),
     ("Retired payload rejection", () => TestRetiredPayloadAsync(apkVerificationScript)),
     ("Minimal layout 9 payload", () => TestMinimalPayloadAsync(apkVerificationScript)),

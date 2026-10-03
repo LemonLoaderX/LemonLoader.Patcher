@@ -24,6 +24,7 @@ public sealed record PatchRequest
     public string? UnityVersion { get; init; }
     public string? UnityLibrariesPath { get; init; }
     public string? InteropOutputPath { get; init; }
+    public bool ForceInteropGeneration { get; init; }
     public string? Cpp2IlPath { get; init; }
     public string? Il2CppInteropCliPath { get; init; }
     public bool AlignApk { get; init; }

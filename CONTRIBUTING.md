@@ -59,8 +59,10 @@ pwsh -NoProfile -File scripts/package-release.ps1 `
 ```
 
 Publishing builds both RIDs by default; pass the same Runtime to publishing and
-packaging to select one. Per-RID output under Output/Releases contains CLI, GUI
-and shared Tools/Il2CppInterop. Archives/checksums go to Output/Packages/<tag>.
+packaging to select one. Per-RID output under Output/Releases contains independent
+CLI and GUI directories, each with its own Tools/Il2CppInterop and legal files.
+Packaging emits separate GUI/CLI archives with the executable at archive root;
+each extracted directory can move independently. Archives/checksums go to Output/Packages/<tag>.
 Staging is fresh and replacement atomic. Formal publish requires clean product
 and generator sources; AllowDirtySource is private local development only.
 
@@ -86,6 +88,9 @@ External-tool deadlines cover exit and stdout/stderr draining. Cancellation kill
 the process tree while the direct child remains alive; already detached/reparented
 descendants cannot be discovered after its exit. The normal tests exercise the
 inherited-pipe case. Front ends never duplicate Core behavior.
+Headless GUI tests cover automatic output names, preserving explicit output and
+prior logs on validation errors, bounded log rows and command layout at minimum
+window size. Rendering screenshots and real tool sessions complement these tests.
 
 ## Publication audit
 

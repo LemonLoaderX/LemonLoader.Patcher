@@ -19,8 +19,9 @@ already-patched inputs are unsupported.
 - [Loader installation/runtime guides](https://github.com/LemonLoaderX/LemonLoader/blob/main/docs/README.md)
 
 [Binary releases](https://github.com/LemonLoaderX/LemonLoader.Patcher/releases)
-require .NET 10. Start CLI/LemonLoader.Patcher.CLI.exe or
-GUI/LemonLoader.Patcher.GUI.exe on Windows; Linux binaries omit .exe.
+require .NET 10. Download the GUI or CLI archive, then start
+LemonLoader.Patcher.GUI.exe or LemonLoader.Patcher.CLI.exe at its root on Windows;
+Linux binaries omit .exe. Keep its adjacent Tools directory with the executable.
 `patch --help` describes the installed CLI options. Alignment/signing are explicit
 operations; the Core patch needs no Android SDK.
 

@@ -123,17 +123,10 @@ internal static class BundledInteropGeneratorTool
 
     public static string FindToolDll()
     {
-        var candidates = new[]
-        {
-            System.IO.Path.Combine(AppContext.BaseDirectory, "Tools", ToolDirectory, ToolFileName),
-            System.IO.Path.Combine(AppContext.BaseDirectory, "..", "Tools", ToolDirectory, ToolFileName)
-        };
-        var path = candidates
-            .Select(System.IO.Path.GetFullPath)
-            .FirstOrDefault(File.Exists);
-        return path ?? throw new FileNotFoundException(
+        var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Tools", ToolDirectory, ToolFileName);
+        return File.Exists(path) ? path : throw new FileNotFoundException(
             "The bundled LemonLoader Il2CppInterop generator is missing. " +
             "Reinstall the complete Patcher release or supply --il2cppinterop-cli explicitly.",
-            candidates[0]);
+            path);
     }
 }

@@ -166,6 +166,7 @@ public static class CliApplication
           --unity-version <version>       Unity version override
           --unity-libraries <directory>   Offline Unity managed reference assemblies
           --interop-output <directory>    Publish generated Interop assemblies
+          --force-interop                 Regenerate instead of reusing matching cached Interop
           --cpp2il <path>                 Cpp2IL executable override
           --il2cppinterop-cli <path>      Built Il2CppInterop.CLI.dll override
 

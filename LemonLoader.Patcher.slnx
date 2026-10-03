@@ -3,4 +3,5 @@
   <Project Path="src/LemonLoader.Patcher.CLI/LemonLoader.Patcher.CLI.csproj" />
   <Project Path="src/LemonLoader.Patcher.GUI/LemonLoader.Patcher.GUI.csproj" />
   <Project Path="tests/LemonLoader.Patcher.Tests/LemonLoader.Patcher.Tests.csproj" />
+  <Project Path="tests/LemonLoader.Patcher.GUI.Tests/LemonLoader.Patcher.GUI.Tests.csproj" />
 </Solution>

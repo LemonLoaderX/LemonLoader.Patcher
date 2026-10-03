@@ -52,10 +52,10 @@ jobs:
         include:
           - os: windows-latest
             runtime: win-x64
-            asset: LemonLoader.Patcher-win-x64.zip
+            asset: LemonLoader.Patcher.*-win-x64.zip
           - os: ubuntu-latest
             runtime: linux-x64
-            asset: LemonLoader.Patcher-linux-x64.tar.gz
+            asset: LemonLoader.Patcher.*-linux-x64.tar.gz
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -136,7 +136,7 @@ jobs:
 
       - name: Record checksums
         working-directory: release-assets
-        run: sha256sum LemonLoader.Patcher-* > SHA256SUMS.txt
+        run: sha256sum LemonLoader.Patcher.* > SHA256SUMS.txt
 
       - name: Publish release with generated notes
         env:

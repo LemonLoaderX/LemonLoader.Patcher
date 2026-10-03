@@ -1,6 +1,6 @@
 # Patching games
 
-Packages require .NET 10. Windows executable: CLI/LemonLoader.Patcher.CLI.exe;
+Packages require .NET 10. Windows executable: ./LemonLoader.Patcher.CLI.exe;
 Linux: CLI/LemonLoader.Patcher.CLI. Use `patch --help` for the complete option
 contract. GUI/LemonLoader.Patcher.GUI exposes the same Core pipeline.
 
@@ -19,8 +19,8 @@ Directory mode preserves existing raw DEX/apktool source and does not require
 primary DEX files to be present.
 
 ```powershell
-CLI/LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk
-CLI/LemonLoader.Patcher.CLI.exe patch UnpackedGame --release Loader.zip
+./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk
+./LemonLoader.Patcher.CLI.exe patch UnpackedGame --release Loader.zip
 ```
 
 Patcher does not bundle a Loader archive. An omitted --release resolves the
@@ -35,7 +35,7 @@ The deployment directory mirrors the runtime MelonLoader root. Standard
 Mods/Plugins/UserLibs/UserData names are case-sensitive on Android.
 
 ```powershell
-CLI/LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
+./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
     --deployment Deployment --profile production `
     --policy "UserData/Example/defaults.cfg=upgrade"
 ```
@@ -68,7 +68,7 @@ output publication.
 ```powershell
 $env:LEMONLOADER_KEYSTORE_PASSWORD = "<store-password>"
 $env:LEMONLOADER_KEY_PASSWORD = "<key-password>"
-CLI/LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
+./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
     --align --keystore signing.jks --key-alias release
 ```
 

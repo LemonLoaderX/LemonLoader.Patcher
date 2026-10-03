@@ -20,23 +20,22 @@ $packageRoot = Join-Path $packageBase $Version
 
 . (Join-Path $PSScriptRoot 'common/Paths.ps1')
 
-function Get-RequiredEntries([string]$RuntimeIdentifier) {
+function Get-RequiredEntries([string]$RuntimeIdentifier, [string]$Application) {
     $suffix = if ($RuntimeIdentifier -eq "win-x64") { ".exe" } else { "" }
     return @(
         "LICENSE",
         "NOTICE",
-        "CLI/LemonLoader.Patcher.CLI$suffix",
-        "GUI/LemonLoader.Patcher.GUI$suffix",
+        "LemonLoader.Patcher.$Application$suffix",
         "Tools/Il2CppInterop/Il2CppInterop.CLI.dll",
         "Tools/Il2CppInterop/lemonloader-il2cppinterop.json"
     )
 }
 
-function Assert-PublishTree([string]$Path, [string]$RuntimeIdentifier) {
+function Assert-PublishTree([string]$Path, [string]$RuntimeIdentifier, [string]$Application) {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         throw "Published runtime '$RuntimeIdentifier' was not found at '$Path'."
     }
-    foreach ($relativePath in Get-RequiredEntries $RuntimeIdentifier) {
+    foreach ($relativePath in Get-RequiredEntries $RuntimeIdentifier $Application) {
         $required = Join-Path $Path ($relativePath.Replace('/', [IO.Path]::DirectorySeparatorChar))
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
             throw "Published runtime '$RuntimeIdentifier' is missing '$relativePath'."
@@ -56,13 +55,13 @@ function Assert-PublishTree([string]$Path, [string]$RuntimeIdentifier) {
     }
 }
 
-function Assert-Zip([string]$Path, [string]$RuntimeIdentifier) {
+function Assert-Zip([string]$Path, [string]$RuntimeIdentifier, [string]$Application) {
     $archive = [IO.Compression.ZipFile]::OpenRead($Path)
     try {
         $entries = $archive.Entries |
             Where-Object { -not [string]::IsNullOrEmpty($_.Name) } |
             ForEach-Object { $_.FullName.Replace('\', '/') }
-        foreach ($required in Get-RequiredEntries $RuntimeIdentifier) {
+        foreach ($required in Get-RequiredEntries $RuntimeIdentifier $Application) {
             if ($required -cnotin $entries) {
                 throw "Archive '$Path' is missing '$required'."
             }
@@ -103,8 +102,8 @@ function New-LinuxArchive([string]$SourceRoot, [string]$Destination) {
         [System.IO.UnixFileMode]::GroupExecute -bor [System.IO.UnixFileMode]::OtherExecute)
     $executables = [Collections.Generic.HashSet[string]]::new(
         [string[]]@(
-            "CLI/LemonLoader.Patcher.CLI",
-            "GUI/LemonLoader.Patcher.GUI"),
+            "LemonLoader.Patcher.CLI",
+            "LemonLoader.Patcher.GUI"),
         [StringComparer]::Ordinal)
     $timestamp = [DateTimeOffset]::new(2020, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 
@@ -206,27 +205,26 @@ New-Item -ItemType Directory -Force -Path $packageRoot | Out-Null
 $assets = [Collections.Generic.List[string]]::new()
 try {
     foreach ($runtimeIdentifier in $Runtime) {
-        $runtimeRoot = Join-Path $releaseRoot $runtimeIdentifier
-        Assert-PublishTree -Path $runtimeRoot -RuntimeIdentifier $runtimeIdentifier
+      foreach ($application in @('GUI', 'CLI')) {
+        $runtimeRoot = Join-Path $releaseRoot "$runtimeIdentifier/$application"
+        Assert-PublishTree -Path $runtimeRoot -RuntimeIdentifier $runtimeIdentifier -Application $application
 
         if ($runtimeIdentifier -eq "win-x64") {
-            $asset = Join-Path $packageRoot "LemonLoader.Patcher-win-x64.zip"
+            $asset = Join-Path $packageRoot "LemonLoader.Patcher.$application-win-x64.zip"
             New-WindowsArchive -SourceRoot $runtimeRoot -Destination $asset
-            Assert-Zip -Path $asset -RuntimeIdentifier $runtimeIdentifier
+            Assert-Zip -Path $asset -RuntimeIdentifier $runtimeIdentifier -Application $application
         }
         else {
-            $asset = Join-Path $packageRoot "LemonLoader.Patcher-linux-x64.tar.gz"
+            $asset = Join-Path $packageRoot "LemonLoader.Patcher.$application-linux-x64.tar.gz"
             New-LinuxArchive -SourceRoot $runtimeRoot -Destination $asset
             $archiveEntries = @(Read-LinuxArchive -Path $asset)
             $entries = @($archiveEntries | ForEach-Object Name)
-            foreach ($required in Get-RequiredEntries $runtimeIdentifier) {
+            foreach ($required in Get-RequiredEntries $runtimeIdentifier $application) {
                 if ($required -cnotin $entries) {
                     throw "Archive '$asset' is missing '$required'."
                 }
             }
-            foreach ($executable in @(
-                "CLI/LemonLoader.Patcher.CLI",
-                "GUI/LemonLoader.Patcher.GUI")) {
+            foreach ($executable in @("LemonLoader.Patcher.$application")) {
                 $entry = $archiveEntries | Where-Object Name -CEQ $executable
                 if ($null -eq $entry -or
                     ($entry.Mode -band [System.IO.UnixFileMode]::UserExecute) -eq 0) {
@@ -235,6 +233,7 @@ try {
             }
         }
         $assets.Add($asset)
+      }
     }
 
     $checksumPath = Join-Path $packageRoot "SHA256SUMS.txt"

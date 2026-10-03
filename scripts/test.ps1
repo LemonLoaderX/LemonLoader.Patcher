@@ -16,6 +16,8 @@ dotnet run --project $patcherTests --configuration $Configuration -- `
 if ($LASTEXITCODE -ne 0) {
     throw "The LemonLoader.Patcher regression tests failed with exit code $LASTEXITCODE."
 }
+dotnet run --project (Join-Path $repositoryRoot 'tests/LemonLoader.Patcher.GUI.Tests') --configuration $Configuration
+if ($LASTEXITCODE -ne 0) { throw 'The Patcher GUI regressions failed.' }
 foreach ($archive in $ReleaseArchive) {
     dotnet run --no-build --project $patcherTests --configuration $Configuration -- `
         --validate-release ([System.IO.Path]::GetFullPath($archive))

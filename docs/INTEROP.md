@@ -6,10 +6,10 @@ and --unity-version override individual inputs; --unity-libraries supplies an
 existing reference directory. Overrides must still match the actual game.
 
 ```powershell
-CLI/LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
+./LemonLoader.Patcher.CLI.exe patch game.apk --output game-lemonloader.apk `
     --release Loader.zip --unity-version 6000.3.8f1 `
     --unity-libraries UnityDependencies --interop-output GeneratedInterop
-CLI/LemonLoader.Patcher.CLI.exe unity-dependencies 6000.3.8f1 --output UnityDependencies
+./LemonLoader.Patcher.CLI.exe unity-dependencies 6000.3.8f1 --output UnityDependencies
 ```
 
 Interop output is a published copy of newly generated DLLs and the host-side
@@ -18,6 +18,12 @@ only after successful generation. The manifest records source/tool/CLI/dependenc
 identity for diagnosis and Mod development; it is not injected into layout 9.
 The entire export directory is replaced. It must not overlap game, deployment,
 dependency or other input/output paths; linked destinations are rejected.
+
+Repeated patches reuse matching Interop below the existing output-adjacent
+`.tools/Interop` cache. Game binary/metadata, Unity references and generator tools
+must match; changed or incomplete cached DLLs regenerate. `--force-interop` or
+GUI's Regenerate Interop bypasses reuse. Delete that cache to reclaim disk space.
+Changing only Loader/runtime or deployment does not require new wrappers.
 
 Packages bundle the generator built from Patcher's own Directory.Build.props pin.
 The net6 generator permits major runtime roll-forward to Patcher's required
