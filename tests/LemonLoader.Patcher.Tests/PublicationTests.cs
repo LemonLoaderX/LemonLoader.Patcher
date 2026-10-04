@@ -14,11 +14,11 @@ internal static class PublicationTests
             File.WriteAllText(Path.Combine(game, "original.txt"), "original");
             foreach (var export in new[] { game, root, Path.Combine(game, "nested") })
                 AssertThrows<ArgumentException>(() => new PatchRequest
-                { InputPath = game, InteropOutputPath = export }.NormalizeAndValidate());
+                { InputPath = game, Generation = new() { OutputPath = export } }.NormalizeAndValidate());
             var apk = Path.Combine(root, "input.apk");
             File.WriteAllText(apk, "input");
             AssertThrows<ArgumentException>(() => new PatchRequest
-            { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = root }.NormalizeAndValidate());
+            { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), Generation = new() { OutputPath = root } }.NormalizeAndValidate());
 
             var tools = Path.Combine(root, "tools");
             Directory.CreateDirectory(tools);
@@ -26,14 +26,27 @@ internal static class PublicationTests
             File.WriteAllText(tool, "input tool");
             var key = Path.Combine(root, "fixture.keystore");
             File.WriteAllText(key, "fixture");
+            foreach (var outputCollision in new[] { apk, tool, key })
+            {
+                AssertThrows<ArgumentException>(() => new PatchRequest
+                {
+                    InputPath = apk, OutputPath = outputCollision, ReleasePath = tool,
+                    PostProcessing = new(true, tool, new(key, "fixture", "fixture"))
+                }.NormalizeAndValidate());
+                AssertThrows<ArgumentException>(() => new ApkProcessingPipeline(new()
+                {
+                    InputPath = apk, OutputPath = outputCollision,
+                    PostProcessing = new(true, tool, new(key, "fixture", "fixture"))
+                }));
+            }
             foreach (var export in new[] { tools, tool })
             {
                 AssertThrows<ArgumentException>(() => new PatchRequest
-                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = export,
-                    AlignApk = true, ZipAlignPath = tool }.NormalizeAndValidate());
+                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), Generation = new() { OutputPath = export },
+                    PostProcessing = new(true, tool) }.NormalizeAndValidate());
                 AssertThrows<ArgumentException>(() => new PatchRequest
-                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = export,
-                    Signing = new(key, "fixture", "fixture"), ApkSignerPath = tool }.NormalizeAndValidate());
+                { InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), Generation = new() { OutputPath = export },
+                    PostProcessing = new(Signing: new(key, "fixture", "fixture"), ApkSignerPath: tool) }.NormalizeAndValidate());
             }
             AssertEqual("input tool", File.ReadAllText(tool));
             var previousPath = Environment.GetEnvironmentVariable("PATH");
@@ -45,11 +58,21 @@ internal static class PublicationTests
                 foreach (var signing in new[] { false, true })
                     await AssertThrowsAsync<ArgumentException>(() => new ApkPatchPipeline(new PatchRequest
                     {
-                        InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), InteropOutputPath = tools,
-                        AlignApk = !signing, Signing = signing ? new(key, "fixture", "fixture") : null
+                        InputPath = apk, OutputPath = Path.Combine(root, "output.apk"), Generation = new() { OutputPath = tools },
+                        PostProcessing = new(Align: !signing, Signing: signing ? new(key, "fixture", "fixture") : null)
                     }).RunAsync());
                 AssertEqual("resolved tool", File.ReadAllText(Path.Combine(tools, "zipalign")));
                 AssertEqual("resolved tool", File.ReadAllText(Path.Combine(tools, "apksigner")));
+                foreach (var signing in new[] { false, true })
+                {
+                    var resolvedTool = Path.Combine(tools, signing ? "apksigner" : "zipalign");
+                    await AssertThrowsAsync<ArgumentException>(() => new ApkProcessingPipeline(new()
+                    {
+                        InputPath = apk, OutputPath = resolvedTool,
+                        PostProcessing = new(Align: !signing, Signing: signing ? new(key, "fixture", "fixture") : null)
+                    }).RunAsync());
+                    AssertEqual("resolved tool", File.ReadAllText(resolvedTool));
+                }
             }
             finally { Environment.SetEnvironmentVariable("PATH", previousPath); }
 

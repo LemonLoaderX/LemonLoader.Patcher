@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal sealed class PatchWorkspace : IDisposable
 {
     private readonly IProgress<PatcherMessage>? progress;

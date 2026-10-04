@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal static class DirectoryInjector
 {
     public static void Apply(

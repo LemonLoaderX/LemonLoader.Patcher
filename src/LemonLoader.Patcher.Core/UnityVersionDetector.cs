@@ -3,6 +3,8 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static partial class UnityVersionDetector
 {
     private static readonly string[] Candidates =

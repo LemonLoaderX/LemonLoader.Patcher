@@ -132,5 +132,8 @@ GUI's operation selector exposes the same four tasks and a separate Unity refere
 export. InteropRequest/InteropPipeline own generation; PatchRequest/ApkPatchPipeline
 own injection/composition; ApkProcessingRequest/ApkProcessingPipeline own independent
 SDK processing. PayloadAssembler owns installed path mapping and policy descriptors.
+Core types use `LemonLoader.Patcher.Core`. `PatchRequest.Generation` composes an
+`InteropRequest`; `PatchRequest.PostProcessing` shares `ApkPostProcessingOptions`
+with independent APK processing. CLI options keep the same file workflow.
 No separate repositories, plugin system or mandatory intermediate package format
 is introduced. Interchange uses ordinary DLL directories and APKs.

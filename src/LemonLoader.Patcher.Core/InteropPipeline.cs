@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 public sealed record InteropResult(string OutputPath, string UnityVersion, int AssemblyCount);
 
 public sealed class InteropPipeline

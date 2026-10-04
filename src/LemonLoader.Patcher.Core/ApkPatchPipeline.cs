@@ -1,5 +1,7 @@
 using System.IO.Compression;
 
+namespace LemonLoader.Patcher.Core;
+
 public sealed class ApkPatchPipeline
 {
     private readonly PatchRequest request;
@@ -22,8 +24,11 @@ public sealed class ApkPatchPipeline
             postProcessing = ApkPostProcessor.Resolve(request.PostProcessing);
             (request with
             {
-                ZipAlignPath = postProcessing.ZipAlignPath,
-                ApkSignerPath = postProcessing.ApkSignerPath
+                PostProcessing = request.PostProcessing with
+                {
+                    ZipAlignPath = postProcessing.ZipAlignPath,
+                    ApkSignerPath = postProcessing.ApkSignerPath
+                }
             }).NormalizeAndValidate();
             Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath!)!);
         }
@@ -42,7 +47,7 @@ public sealed class ApkPatchPipeline
         }
         else
         {
-            var generated = await new GameInteropGenerator(request.Generation.NormalizeAndValidate(), progress)
+            var generated = await new GameInteropGenerator(request.Generation!, progress)
                 .GenerateAsync(workRoot, cancellationToken);
             interopRoot = generated.DirectoryPath;
             unityVersion = generated.UnityVersion;

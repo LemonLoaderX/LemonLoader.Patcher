@@ -1,5 +1,6 @@
-using System.Security.Cryptography;
 using System.Text.Json;
+
+namespace LemonLoader.Patcher.Core;
 
 internal static class InteropGenerationManifest
 {
@@ -7,16 +8,14 @@ internal static class InteropGenerationManifest
 
     public static void Write(
         string outputDirectory,
-        string inputDirectory,
         string unityVersion,
         UnityDependenciesResolution unityDependencies,
-        string cpp2IlPath,
         string cpp2IlVersion,
         InteropGeneratorTool il2CppInterop)
     {
         var assemblies = Directory.GetFiles(outputDirectory, "*.dll", SearchOption.TopDirectoryOnly)
             .OrderBy(path => path, StringComparer.Ordinal)
-            .Select(path => DescribeFile(path, Path.GetFileName(path)))
+            .Select(path => new { name = Path.GetFileName(path), size = new FileInfo(path).Length })
             .ToArray();
         if (assemblies.Length == 0)
             throw new InvalidDataException("Il2CppInterop did not generate any assemblies.");
@@ -33,22 +32,13 @@ internal static class InteropGenerationManifest
                 downloadUrl = unityDependencies.DownloadUrl,
                 archiveSha256 = unityDependencies.ArchiveSha256,
                 assemblyCount = unityDependencies.AssemblyCount,
-                contentSha256 = unityDependencies.ContentSha256,
                 unstrippingEnabled = true
-            },
-            inputs = new[]
-            {
-                DescribeFile(Path.Combine(inputDirectory, "libil2cpp.so"), "libil2cpp.so"),
-                DescribeFile(Path.Combine(inputDirectory, "global-metadata.dat"), "global-metadata.dat")
             },
             tools = new
             {
                 cpp2IlVersion,
-                cpp2IlSha256 = HashFile(cpp2IlPath),
                 il2CppInteropVersion = il2CppInterop.Version,
                 il2CppInteropSource = il2CppInterop.Source,
-                il2CppInteropSha256 = il2CppInterop.Sha256,
-                il2CppInteropContentSha256 = il2CppInterop.ContentSha256,
                 xrefCache = false
             },
             assemblies
@@ -58,17 +48,4 @@ internal static class InteropGenerationManifest
             JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    private static object DescribeFile(string path, string name)
-    {
-        var file = new FileInfo(path);
-        if (!file.Exists)
-            throw new FileNotFoundException($"Interop manifest input '{name}' was not found.", path);
-        return new { name, size = file.Length, sha256 = HashFile(path) };
-    }
-
-    private static string HashFile(string path)
-    {
-        using var input = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-    }
 }

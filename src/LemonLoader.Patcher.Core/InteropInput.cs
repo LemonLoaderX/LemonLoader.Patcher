@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal static class InteropInput
 {
     internal static string[] Assemblies(string directory)

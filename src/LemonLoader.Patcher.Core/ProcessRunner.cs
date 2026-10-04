@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static partial class ProcessRunner
 {
     private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);

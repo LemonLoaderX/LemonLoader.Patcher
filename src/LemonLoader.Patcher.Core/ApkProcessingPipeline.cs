@@ -1,37 +1,45 @@
+namespace LemonLoader.Patcher.Core;
+
 public sealed record ApkProcessingRequest
 {
     public required string InputPath { get; init; }
     public required string OutputPath { get; init; }
-    public bool AlignApk { get; init; }
-    public string? ZipAlignPath { get; init; }
-    public string? ApkSignerPath { get; init; }
-    public SigningOptions? Signing { get; init; }
+    public ApkPostProcessingOptions PostProcessing { get; init; } = new();
 
-    internal PatchRequest Validate() => new PatchRequest
+    public ApkProcessingRequest NormalizeAndValidate()
     {
-        InputPath = InputPath, OutputPath = OutputPath, AlignApk = AlignApk,
-        ZipAlignPath = ZipAlignPath, ApkSignerPath = ApkSignerPath, Signing = Signing
-    }.NormalizeAndValidate();
+        var options = PostProcessing.NormalizeAndValidate();
+        var request = this with
+        {
+            InputPath = RequestPaths.Optional(InputPath) ?? throw new ArgumentException("Input APK is required."),
+            OutputPath = RequestPaths.Optional(OutputPath) ?? throw new ArgumentException("Output APK is required."),
+            PostProcessing = options
+        };
+        RequestPaths.RequireFile(request.InputPath, "Input APK");
+        if (!options.Align && options.Signing is null)
+            throw new ArgumentException("APK processing requires alignment or signing.");
+        RequestPaths.ValidateOutputFile(request.OutputPath, request.InputPath,
+            options.ZipAlignPath, options.ApkSignerPath, options.Signing?.KeystorePath);
+        return request;
+    }
 }
 
 public sealed class ApkProcessingPipeline
 {
-    private readonly PatchRequest request;
+    private readonly ApkProcessingRequest request;
     private readonly IProgress<PatcherMessage>? progress;
 
     public ApkProcessingPipeline(ApkProcessingRequest request, IProgress<PatcherMessage>? progress = null)
     {
-        this.request = request.Validate();
-        if (this.request.InputKind != PatchInputKind.Apk)
-            throw new ArgumentException("APK processing requires a file input.");
-        if (!this.request.AlignApk && this.request.Signing is null)
-            throw new ArgumentException("APK processing requires alignment or signing.");
+        this.request = request.NormalizeAndValidate();
         this.progress = progress;
     }
 
     public async Task<PatchResult> RunAsync(CancellationToken cancellationToken = default)
     {
         var options = ApkPostProcessor.Resolve(request.PostProcessing);
+        RequestPaths.ValidateOutputFile(request.OutputPath!, request.InputPath,
+            options.ZipAlignPath, options.ApkSignerPath, options.Signing?.KeystorePath);
         using (var apk = System.IO.Compression.ZipFile.OpenRead(request.InputPath))
             ArchiveSafety.Validate(apk);
         using var work = new PatchWorkspace(progress);

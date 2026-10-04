@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal static class DirectoryPublisher
 {
     public static void Replace(string sourcePath, string destinationPath,

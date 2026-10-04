@@ -8,4 +8,7 @@
     <AssemblyMetadata Include="BundledIl2CppInteropRevision"
                       Value="$(BundledIl2CppInteropRevision)" />
   </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'LemonLoader.Patcher.Core'">
+    <Using Include="LemonLoader.Patcher.Core" />
+  </ItemGroup>
 </Project>

@@ -1,19 +1,16 @@
 using System.Reflection;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+
+namespace LemonLoader.Patcher.Core;
 
 internal sealed record InteropGeneratorTool(
     string Path,
     string Version,
-    string Source,
-    string Sha256,
-    string ContentSha256)
+    string Source)
 {
-    public static InteropGeneratorTool FromOverride(string path, bool recordIdentity = true) =>
-        Describe(path, "override", recordIdentity);
+    public static InteropGeneratorTool FromOverride(string path) => Describe(path, "override");
 
-    public static InteropGeneratorTool FromBundledFork(string path, bool recordIdentity = true)
+    public static InteropGeneratorTool FromBundledFork(string path)
     {
         var fullPath = System.IO.Path.GetFullPath(path);
         var provenancePath = System.IO.Path.Combine(
@@ -46,13 +43,12 @@ internal sealed record InteropGeneratorTool(
                 exception);
         }
 
-        return Describe(fullPath, "bundled-fork", recordIdentity);
+        return Describe(fullPath, "bundled-fork");
     }
 
     private static InteropGeneratorTool Describe(
         string path,
-        string source,
-        bool recordIdentity)
+        string source)
     {
         var fullPath = System.IO.Path.GetFullPath(path);
         if (!File.Exists(fullPath))
@@ -76,39 +72,9 @@ internal sealed record InteropGeneratorTool(
         if (string.IsNullOrWhiteSpace(version))
             throw new InvalidDataException($"The Il2CppInterop CLI '{fullPath}' has no assembly version.");
 
-        var hash = recordIdentity ? HashFile(fullPath) : string.Empty;
-        var contentHash = recordIdentity ? ComputeContentHash(System.IO.Path.GetDirectoryName(fullPath)!) : string.Empty;
-        return new(fullPath, version, source, hash, contentHash);
+        return new(fullPath, version, source);
     }
 
-    private static string ComputeContentHash(string directory)
-    {
-        var files = Directory.GetFiles(directory, "*", SearchOption.TopDirectoryOnly)
-            .Where(path =>
-                string.Equals(System.IO.Path.GetExtension(path), ".dll", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase) ||
-                path.EndsWith(".runtimeconfig.json", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(
-                    System.IO.Path.GetFileName(path),
-                    BundledInteropGeneratorTool.ProvenanceFileName,
-                    StringComparison.Ordinal))
-            .OrderBy(path => System.IO.Path.GetFileName(path), StringComparer.Ordinal)
-            .ToArray();
-        using var contentHasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        foreach (var file in files)
-        {
-            var info = new FileInfo(file);
-            var line = $"{info.Name}|{info.Length}|{HashFile(file)}\n";
-            contentHasher.AppendData(Encoding.UTF8.GetBytes(line));
-        }
-        return Convert.ToHexString(contentHasher.GetHashAndReset()).ToLowerInvariant();
-    }
-
-    private static string HashFile(string path)
-    {
-        using var input = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
-    }
 }
 
 internal static class BundledInteropGeneratorTool

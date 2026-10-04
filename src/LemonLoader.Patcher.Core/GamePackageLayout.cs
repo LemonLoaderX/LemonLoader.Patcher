@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal static class GamePackageLayout
 {
     public const string Arm64LibraryRoot = "lib/arm64-v8a";

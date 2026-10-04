@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 public enum DeploymentFilePolicy
 {
     Seed,

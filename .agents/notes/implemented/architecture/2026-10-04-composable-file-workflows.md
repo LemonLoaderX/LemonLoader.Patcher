@@ -13,11 +13,17 @@ that are then deleted without use.
 
 ## Decision
 
+Export digest production below is partially superseded by
+[lightweight provenance](../simplification/2026-10-04-lightweight-interop-provenance.md).
+
 InteropRequest/InteropPipeline own independent generation from APK/directory or
 explicit binary/metadata/version. They require no Loader Release, deployment,
 signing or native main/Unity startup layout. GameInteropGenerator accepts this
 request rather than PatchRequest. CLI generate-interop and GUI's generation mode
 use the same pipeline with transactional output replacement.
+Core types use the product namespace. PatchRequest composes InteropRequest and
+ApkPostProcessingOptions rather than duplicating their fields and validation.
+Independent processing does not convert its request to an injection request.
 
 Injection consumes ordinary top-level DLLs via --interop. inject requires this
 input and rejects generation options; patch can generate or consume existing

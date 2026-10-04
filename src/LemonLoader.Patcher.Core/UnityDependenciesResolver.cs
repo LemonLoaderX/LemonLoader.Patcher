@@ -6,6 +6,8 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+namespace LemonLoader.Patcher.Core;
+
 internal sealed record UnityDependencySource(string Name, string UrlTemplate)
 {
     public Uri GetUri(string version) => new(string.Format(UrlTemplate, version));

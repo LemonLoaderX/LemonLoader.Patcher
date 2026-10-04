@@ -40,8 +40,8 @@ internal static class WorkflowTests
             var directoryResult = await new ApkPatchPipeline(request with { InputPath = directory, OutputPath = null }).RunAsync();
             AssertTrue(directoryResult.ModifiedInPlace, "Directory injection did not complete.");
             AssertEqual("original unity", File.ReadAllText(GamePackageLayout.FilePath(directory, GamePackageLayout.UnityLibrary)));
-            AssertThrows<ArgumentException>(() => (request with { UnityVersion = "2022.3.62f2" }).NormalizeAndValidate());
-            AssertThrows<ArgumentException>(() => (request with { InteropOutputPath = Path.Combine(root, "export") }).NormalizeAndValidate());
+            AssertThrows<ArgumentException>(() => (request with { Generation = new() { UnityVersion = "2022.3.62f2" } }).NormalizeAndValidate());
+            AssertThrows<ArgumentException>(() => (request with { Generation = new() { OutputPath = Path.Combine(root, "export") } }).NormalizeAndValidate());
             AssertThrows<ArgumentException>(() => (request with { OutputPath = Path.Combine(interop, "Game.dll") }).NormalizeAndValidate());
             AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest([game, "--output", output], injectionOnly: true));
             AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(

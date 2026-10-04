@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+namespace LemonLoader.Patcher.Core;
+
 /// <summary>Names and artifact identities for selectable CoreCLR distributions.</summary>
 public static class RuntimeVariants
 {

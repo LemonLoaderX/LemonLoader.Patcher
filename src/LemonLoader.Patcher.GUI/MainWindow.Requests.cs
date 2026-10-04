@@ -14,8 +14,6 @@ public sealed partial class MainWindow
             .Split(
                 ['\r', '\n'],
                 StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var signing = BuildSigning();
-
         return new()
         {
             InputPath = inputPath,
@@ -27,17 +25,8 @@ public sealed partial class MainWindow
             DeploymentPath = Optional(DeploymentPath),
             DeploymentPolicies = DeploymentPolicyOptions.Create(profile, rules),
             InteropInputPath = injecting ? Required(InteropInputPath, "Choose existing Interop DLLs.") : null,
-            UnityVersion = injecting ? null : Optional(UnityVersion),
-            UnityLibrariesPath = injecting ? null : Optional(UnityLibrariesPath),
-            GameAssemblyPath = injecting ? null : Optional(GameAssemblyPath),
-            MetadataPath = injecting ? null : Optional(MetadataPath),
-            InteropOutputPath = injecting ? null : Optional(InteropOutputPath),
-            Cpp2IlPath = injecting ? null : Optional(Cpp2IlPath),
-            Il2CppInteropCliPath = injecting ? null : Optional(Il2CppInteropCliPath),
-            AlignApk = EnableAlignment.IsChecked == true,
-            ZipAlignPath = EnableAlignment.IsChecked == true ? Optional(ZipAlignPath) : null,
-            ApkSignerPath = signing is not null ? Optional(ApkSignerPath) : null,
-            Signing = signing
+            Generation = injecting ? null : ReadGeneration(Optional(InteropOutputPath)),
+            PostProcessing = BuildPostProcessing()
         };
     }
 
@@ -49,9 +38,20 @@ public sealed partial class MainWindow
                 Optional(KeyPassword))
             : null;
 
-    private InteropRequest BuildInteropRequest() => new()
+    private ApkPostProcessingOptions BuildPostProcessing()
     {
-        InputPath = Optional(InputPath), OutputPath = Required(InteropOutputPath, "Choose an Interop output directory."),
+        var signing = BuildSigning();
+        return new(EnableAlignment.IsChecked == true,
+            EnableAlignment.IsChecked == true ? Optional(ZipAlignPath) : null,
+            signing, signing is not null ? Optional(ApkSignerPath) : null);
+    }
+
+    private InteropRequest BuildInteropRequest() =>
+        ReadGeneration(Required(InteropOutputPath, "Choose an Interop output directory.")) with { InputPath = Optional(InputPath) };
+
+    private InteropRequest ReadGeneration(string? output) => new()
+    {
+        OutputPath = output,
         UnityVersion = Optional(UnityVersion), UnityLibrariesPath = Optional(UnityLibrariesPath),
         GameAssemblyPath = Optional(GameAssemblyPath), MetadataPath = Optional(MetadataPath),
         Cpp2IlPath = Optional(Cpp2IlPath), Il2CppInteropCliPath = Optional(Il2CppInteropCliPath)
@@ -59,15 +59,11 @@ public sealed partial class MainWindow
 
     private ApkProcessingRequest BuildProcessingRequest()
     {
-        var signing = BuildSigning();
         return new()
         {
             InputPath = Required(InputPath, "Choose an input APK."),
             OutputPath = Required(OutputApkPath, "Choose an output APK."),
-            AlignApk = EnableAlignment.IsChecked == true,
-            ZipAlignPath = EnableAlignment.IsChecked == true ? Optional(ZipAlignPath) : null,
-            ApkSignerPath = signing is not null ? Optional(ApkSignerPath) : null,
-            Signing = signing
+            PostProcessing = BuildPostProcessing()
         };
     }
 

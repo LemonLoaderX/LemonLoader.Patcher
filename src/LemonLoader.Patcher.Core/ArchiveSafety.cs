@@ -1,5 +1,7 @@
 using System.IO.Compression;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static class ArchiveSafety
 {
     public static void Validate(ZipArchive archive)

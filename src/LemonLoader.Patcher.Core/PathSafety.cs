@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 internal static class PathSafety
 {
     public static bool Contains(string parent, string child)
@@ -15,7 +17,7 @@ internal static class PathSafety
             try
             {
                 if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidDataException($"Refusing to write through linked path '{current}'.");
+                    throw new InvalidDataException($"Refusing linked path '{current}'.");
             }
             catch (FileNotFoundException) { }
             catch (DirectoryNotFoundException) { }

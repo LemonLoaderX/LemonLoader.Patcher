@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 public sealed record InteropRequest
 {
     public string? InputPath { get; init; }
@@ -46,7 +48,8 @@ public sealed record InteropRequest
         {
             if (File.Exists(output)) throw new ArgumentException("Interop output must be a directory.");
             RequestPaths.ValidateExport(output, request.InputPath, request.GameAssemblyPath, request.MetadataPath,
-                request.UnityLibrariesPath, request.Cpp2IlPath, request.Il2CppInteropCliPath, ToolCachePaths.Root);
+                request.UnityLibrariesPath, request.Cpp2IlPath, request.Il2CppInteropCliPath,
+                request.Il2CppInteropCliPath is { } generator ? Path.GetDirectoryName(generator) : null, ToolCachePaths.Root);
         }
         return request;
     }

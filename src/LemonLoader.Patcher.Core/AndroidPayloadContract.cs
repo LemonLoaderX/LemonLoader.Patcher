@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static class AndroidPayloadContract
 {
     public const int FormatVersion = 9;

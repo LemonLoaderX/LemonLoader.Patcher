@@ -1,3 +1,5 @@
+namespace LemonLoader.Patcher.Core;
+
 public sealed record UnityDependenciesRequest
 {
     public required string UnityVersion { get; init; }
@@ -28,7 +30,7 @@ public static class UnityDependenciesPipeline
 
         var outputPath = Path.GetFullPath(request.OutputPath);
         var cachePath = request.CacheRoot;
-        if (ContainsPath(outputPath, cachePath) || ContainsPath(cachePath, outputPath))
+        if (PathSafety.Contains(outputPath, cachePath) || PathSafety.Contains(cachePath, outputPath))
         {
             throw new ArgumentException(
                 "Unity dependency output and cache directories must not contain each other.");
@@ -51,14 +53,4 @@ public static class UnityDependenciesPipeline
             resolution.AssemblyCount);
     }
 
-    private static bool ContainsPath(string parent, string child)
-    {
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        var relative = Path.GetRelativePath(parent, child);
-        return relative == "." ||
-               (!relative.StartsWith(".." + Path.DirectorySeparatorChar, comparison) &&
-                !Path.IsPathRooted(relative));
-    }
 }

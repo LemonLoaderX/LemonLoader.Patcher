@@ -132,7 +132,7 @@ static Task TestToolCachePathsAsync()
         AssertThrows<ArgumentException>(() => new PatchRequest
         {
             InputPath = input, OutputPath = Path.Combine(fixture, "output.apk"),
-            InteropOutputPath = Path.Combine(root, "destructive-export")
+            Generation = new() { OutputPath = Path.Combine(root, "destructive-export") }
         }.NormalizeAndValidate());
     }
     finally { Directory.Delete(fixture, true); }
@@ -257,9 +257,6 @@ static Task TestInteropGeneratorOverrideAsync()
         });
         File.WriteAllText(provenancePath, provenance);
         var tool = InteropGeneratorTool.FromOverride(toolPath);
-        var transientTool = InteropGeneratorTool.FromOverride(toolPath, recordIdentity: false);
-        AssertEqual(string.Empty, transientTool.Sha256);
-        AssertEqual(string.Empty, transientTool.ContentSha256);
         AssertEqual(Path.GetFullPath(toolPath), tool.Path);
         AssertEqual("override", tool.Source);
         AssertTrue(!string.IsNullOrWhiteSpace(tool.Version), "The override tool version was not detected.");
@@ -278,12 +275,6 @@ static Task TestInteropGeneratorOverrideAsync()
         AssertEqual(
             "https://github.com/LemonLoaderX/LemonLoader/releases/latest/download/LemonLoader-runtime-android-arm64.zip",
             ReleaseResolver.LatestUrl);
-        File.WriteAllText(generatorPath, "generator-v2");
-        var changedTool = InteropGeneratorTool.FromOverride(toolPath);
-        AssertTrue(
-            changedTool.ContentSha256 != tool.ContentSha256,
-            "The tool content hash did not include the generator dependency.");
-        File.WriteAllText(generatorPath, "generator-v1");
 
         var input = Path.Combine(root, "input");
         var output = Path.Combine(root, "output");
@@ -299,7 +290,6 @@ static Task TestInteropGeneratorOverrideAsync()
 
         InteropGenerationManifest.Write(
             output,
-            input,
             "6000.3.8f1",
             new UnityDependenciesResolution(
                 unity,
@@ -310,7 +300,6 @@ static Task TestInteropGeneratorOverrideAsync()
                 null,
                 1,
                 new string('1', 64)),
-            cpp2Il,
             "fixture",
             tool);
 
@@ -320,12 +309,10 @@ static Task TestInteropGeneratorOverrideAsync()
         var tools = document.RootElement.GetProperty("tools");
         AssertEqual("override", tools.GetProperty("il2CppInteropSource").GetString());
         AssertEqual(tool.Version, tools.GetProperty("il2CppInteropVersion").GetString());
-        AssertEqual(
-            Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(toolPath))).ToLowerInvariant(),
-            tools.GetProperty("il2CppInteropSha256").GetString());
-        AssertEqual(
-            tool.ContentSha256,
-            tools.GetProperty("il2CppInteropContentSha256").GetString());
+        AssertTrue(!tools.TryGetProperty("il2CppInteropSha256", out _) &&
+            !document.RootElement.TryGetProperty("inputs", out _) &&
+            !document.RootElement.GetProperty("assemblies")[0].TryGetProperty("sha256", out _),
+            "Generation provenance must not require hashing game inputs or generated assemblies.");
     }
     finally
     {
@@ -1100,8 +1087,8 @@ static async Task TestPostProcessingContractAsync()
             InputPath = apk,
             OutputPath = output
         }.NormalizeAndValidate();
-        AssertTrue(!basic.AlignApk, "APK alignment must be opt-in.");
-        AssertTrue(basic.Signing is null, "APK signing must be opt-in.");
+        AssertTrue(!basic.PostProcessing.Align, "APK alignment must be opt-in.");
+        AssertTrue(basic.PostProcessing.Signing is null, "APK signing must be opt-in.");
         await ApkPostProcessor.PublishAsync(
             apk,
             basic.OutputPath!,
@@ -1117,17 +1104,16 @@ static async Task TestPostProcessingContractAsync()
         {
             InputPath = apk,
             OutputPath = output,
-            Signing = new SigningOptions(keystore, "password", "alias")
+            PostProcessing = new(Signing: new SigningOptions(keystore, "password", "alias"))
         }.NormalizeAndValidate();
-        AssertTrue(!signingOnly.AlignApk, "Signing must not implicitly request alignment.");
-        AssertTrue(signingOnly.Signing is not null, "Signing-only APK output was rejected.");
+        AssertTrue(!signingOnly.PostProcessing.Align, "Signing must not implicitly request alignment.");
+        AssertTrue(signingOnly.PostProcessing.Signing is not null, "Signing-only APK output was rejected.");
 
         var missingAlignTool = new PatchRequest
         {
             InputPath = apk,
             OutputPath = Path.Combine(root, "aligned.apk"),
-            AlignApk = true,
-            ZipAlignPath = Path.Combine(root, "missing-zipalign")
+            PostProcessing = new(Align: true, ZipAlignPath: Path.Combine(root, "missing-zipalign"))
         }.NormalizeAndValidate();
         AssertThrows<InvalidOperationException>(() =>
             ApkPostProcessor.Resolve(missingAlignTool.PostProcessing));
@@ -1135,7 +1121,7 @@ static async Task TestPostProcessingContractAsync()
         var missingSignerTool = signingOnly with
         {
             OutputPath = Path.Combine(root, "signed.apk"),
-            ApkSignerPath = Path.Combine(root, "missing-apksigner")
+            PostProcessing = signingOnly.PostProcessing with { ApkSignerPath = Path.Combine(root, "missing-apksigner") }
         };
         AssertThrows<InvalidOperationException>(() =>
             ApkPostProcessor.Resolve(missingSignerTool.PostProcessing));
@@ -1144,13 +1130,13 @@ static async Task TestPostProcessingContractAsync()
         {
             InputPath = apk,
             OutputPath = output,
-            ZipAlignPath = Path.Combine(root, "zipalign")
+            PostProcessing = new(ZipAlignPath: Path.Combine(root, "zipalign"))
         }.NormalizeAndValidate());
         AssertThrows<ArgumentException>(() => new PatchRequest
         {
             InputPath = apk,
             OutputPath = output,
-            ApkSignerPath = Path.Combine(root, "apksigner")
+            PostProcessing = new(ApkSignerPath: Path.Combine(root, "apksigner"))
         }.NormalizeAndValidate());
 
         var directory = Path.Combine(root, "unpacked");
@@ -1165,12 +1151,12 @@ static async Task TestPostProcessingContractAsync()
         AssertThrows<ArgumentException>(() => new PatchRequest
         {
             InputPath = directory,
-            AlignApk = true
+            PostProcessing = new(Align: true)
         }.NormalizeAndValidate());
         AssertThrows<ArgumentException>(() => new PatchRequest
         {
             InputPath = directory,
-            Signing = new SigningOptions(keystore, "password", "alias")
+            PostProcessing = new(Signing: new SigningOptions(keystore, "password", "alias"))
         }.NormalizeAndValidate());
     }
     finally
@@ -1238,22 +1224,24 @@ static async Task TestCliContractAsync()
         AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
             [apk, "--output", outputApk, "--align", "--align"]));
 
+        var deployment = Path.Combine(root, "deployment");
+        Directory.CreateDirectory(deployment);
         var request = CliRequestParser.ParsePatchRequest(
         [
             apk,
             "--output", outputApk,
-            "--deployment", root,
+            "--deployment", deployment,
             "--profile", "production",
             "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location,
             "--align",
             "--policy", "Mods/**=upgrade",
             "--policy", "Mods/Required.dll=enforce"
         ]);
-        AssertEqual(Path.GetFullPath(root), request.DeploymentPath);
-        AssertTrue(request.AlignApk, "The --align switch was not parsed.");
+        AssertEqual(Path.GetFullPath(deployment), request.DeploymentPath);
+        AssertTrue(request.PostProcessing.Align, "The --align switch was not parsed.");
         AssertEqual(
             Path.GetFullPath(typeof(ApkPatchPipeline).Assembly.Location),
-            request.Il2CppInteropCliPath);
+            request.Generation!.Il2CppInteropCliPath);
         AssertEqual(
             DeploymentFilePolicy.Upgrade,
             request.DeploymentPolicies.Resolve("Mods/Other.dll"));

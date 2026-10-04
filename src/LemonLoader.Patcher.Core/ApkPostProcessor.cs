@@ -1,10 +1,41 @@
 using System.Security.Cryptography;
 
-internal sealed record ApkPostProcessingOptions(
-    bool Align,
-    string? ZipAlignPath,
-    SigningOptions? Signing,
-    string? ApkSignerPath);
+namespace LemonLoader.Patcher.Core;
+
+public sealed record SigningOptions(
+    string KeystorePath, string StorePassword, string KeyAlias, string? KeyPassword = null);
+
+public sealed record ApkPostProcessingOptions(
+    bool Align = false,
+    string? ZipAlignPath = null,
+    SigningOptions? Signing = null,
+    string? ApkSignerPath = null)
+{
+    public ApkPostProcessingOptions NormalizeAndValidate()
+    {
+        var options = this with
+        {
+            ZipAlignPath = RequestPaths.Optional(ZipAlignPath),
+            ApkSignerPath = RequestPaths.Optional(ApkSignerPath),
+            Signing = Signing is null ? null : Signing with
+            {
+                KeystorePath = RequestPaths.Optional(Signing.KeystorePath)
+                    ?? throw new ArgumentException("Keystore is required.")
+            }
+        };
+        if (options.ZipAlignPath is not null && !options.Align)
+            throw new ArgumentException("--zipalign requires --align.");
+        if (options.ApkSignerPath is not null && options.Signing is null)
+            throw new ArgumentException("--apksigner requires --keystore.");
+        if (options.Signing is { } signing)
+        {
+            RequestPaths.RequireFile(signing.KeystorePath, "Signing keystore");
+            if (string.IsNullOrWhiteSpace(signing.StorePassword) || string.IsNullOrWhiteSpace(signing.KeyAlias))
+                throw new ArgumentException("Signing requires a keystore password and key alias.");
+        }
+        return options;
+    }
+}
 
 internal sealed record ResolvedApkPostProcessing(
     string? ZipAlignPath,

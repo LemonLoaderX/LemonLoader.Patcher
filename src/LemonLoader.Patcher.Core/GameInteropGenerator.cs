@@ -1,5 +1,7 @@
 using System.IO.Compression;
 
+namespace LemonLoader.Patcher.Core;
+
 internal sealed record GeneratedInterop(string DirectoryPath, string UnityVersion);
 
 internal sealed class GameInteropGenerator(
@@ -94,10 +96,9 @@ internal sealed class GameInteropGenerator(
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(outputRoot);
-        var recordIdentity = request.OutputPath is not null;
         var interopTool = request.Il2CppInteropCliPath is null
-            ? InteropGeneratorTool.FromBundledFork(BundledInteropGeneratorTool.FindToolDll(), recordIdentity)
-            : InteropGeneratorTool.FromOverride(request.Il2CppInteropCliPath, recordIdentity);
+            ? InteropGeneratorTool.FromBundledFork(BundledInteropGeneratorTool.FindToolDll())
+            : InteropGeneratorTool.FromOverride(request.Il2CppInteropCliPath);
         var cpp2Il = request.Cpp2IlPath ?? await Cpp2IlResolver.ResolveAsync(
             ToolCachePaths.Root,
             progress,
@@ -134,13 +135,11 @@ internal sealed class GameInteropGenerator(
                 outputRoot,
                 unityDependencies.DirectoryPath));
         _ = InteropInput.Assemblies(outputRoot);
-        if (recordIdentity)
+        if (request.OutputPath is not null)
             InteropGenerationManifest.Write(
                 outputRoot,
-                inputRoot,
                 unityVersion,
                 unityDependencies,
-                cpp2Il,
                 Cpp2IlResolver.Version,
                 interopTool);
     }

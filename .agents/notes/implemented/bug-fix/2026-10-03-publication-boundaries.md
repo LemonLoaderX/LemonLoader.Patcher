@@ -14,7 +14,10 @@ Cancellation after publishing also misreports a completed operation as cancelled
 Request validation rejects overlapping Interop export and input/output paths,
 including alignment/signing executables. Tools discovered on PATH are checked
 after resolution and before any export.
-Write targets and existing ancestors reject filesystem links. Copying and APK
+APK outputs likewise cannot overwrite game, Release, deployment, Interop, tool or
+keystore inputs, including resolved SDK executables and application tool caches.
+Write targets, protected inputs and existing ancestors reject filesystem links;
+input aliases must not bypass output collision checks. Copying and APK
 assembly check cancellation while operating on staging; directory injection rolls
 back applied files if cancelled before its commit. Backups use cancellable copy,
 and cancellation is checked again before replacing each destination, including

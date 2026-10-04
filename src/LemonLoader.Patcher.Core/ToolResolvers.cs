@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static class Cpp2IlResolver
 {
     public const string Version = "2022.1.0-pre-release.21";

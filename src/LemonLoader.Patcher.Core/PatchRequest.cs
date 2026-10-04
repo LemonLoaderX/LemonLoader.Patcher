@@ -1,14 +1,6 @@
-public sealed record SigningOptions(
-    string KeystorePath,
-    string StorePassword,
-    string KeyAlias,
-    string? KeyPassword = null);
+namespace LemonLoader.Patcher.Core;
 
-internal enum PatchInputKind
-{
-    Apk,
-    Directory
-}
+internal enum PatchInputKind { Apk, Directory }
 
 public sealed record PatchRequest
 {
@@ -17,168 +9,70 @@ public sealed record PatchRequest
     public string? ReleasePath { get; init; }
     public string? RuntimeVariant { get; init; }
     public string? DeploymentPath { get; init; }
-    public DeploymentPolicyOptions DeploymentPolicies { get; init; } =
-        DeploymentPolicyOptions.Create(null, []);
-    public string? GameAssemblyPath { get; init; }
-    public string? MetadataPath { get; init; }
-    public string? UnityVersion { get; init; }
-    public string? UnityLibrariesPath { get; init; }
-    public string? InteropOutputPath { get; init; }
+    public DeploymentPolicyOptions DeploymentPolicies { get; init; } = DeploymentPolicyOptions.Create(null, []);
     public string? InteropInputPath { get; init; }
-    public string? Cpp2IlPath { get; init; }
-    public string? Il2CppInteropCliPath { get; init; }
-    public bool AlignApk { get; init; }
-    public string? ZipAlignPath { get; init; }
-    public string? ApkSignerPath { get; init; }
-    public SigningOptions? Signing { get; init; }
+    public InteropRequest? Generation { get; init; }
+    public ApkPostProcessingOptions PostProcessing { get; init; } = new();
     internal PatchInputKind InputKind { get; init; }
-
     internal string ToolCacheRoot => ToolCachePaths.Root;
-
-    internal InteropRequest Generation => new()
-    {
-        InputPath = InputPath, OutputPath = InteropOutputPath,
-        GameAssemblyPath = GameAssemblyPath, MetadataPath = MetadataPath, UnityVersion = UnityVersion,
-        UnityLibrariesPath = UnityLibrariesPath, Cpp2IlPath = Cpp2IlPath, Il2CppInteropCliPath = Il2CppInteropCliPath,
-        InputKind = InputKind
-    };
-
-    internal ApkPostProcessingOptions PostProcessing => new(
-        AlignApk,
-        ZipAlignPath,
-        Signing,
-        ApkSignerPath);
 
     public PatchRequest NormalizeAndValidate()
     {
-        if (RuntimeVariant is not null) RuntimeVariants.Normalize(RuntimeVariant);
-        static string FullPath(string value, string name)
+        if (RuntimeVariant is not null)
+            RuntimeVariants.Normalize(RuntimeVariant);
+        var request = this with
         {
-            if (string.IsNullOrWhiteSpace(value))
-                throw new ArgumentException($"{name} is required.");
-            return Path.GetFullPath(value);
-        }
-
-        static string? OptionalPath(string? value) =>
-            string.IsNullOrWhiteSpace(value) ? null : Path.GetFullPath(value);
-
-        var normalized = this with
-        {
-            InputPath = FullPath(InputPath, "Input"),
-            OutputPath = OptionalPath(OutputPath),
-            ReleasePath = OptionalPath(ReleasePath),
-            DeploymentPath = OptionalPath(DeploymentPath),
-            GameAssemblyPath = OptionalPath(GameAssemblyPath),
-            MetadataPath = OptionalPath(MetadataPath),
-            UnityLibrariesPath = OptionalPath(UnityLibrariesPath),
-            InteropOutputPath = OptionalPath(InteropOutputPath),
-            InteropInputPath = OptionalPath(InteropInputPath),
-            Cpp2IlPath = OptionalPath(Cpp2IlPath),
-            Il2CppInteropCliPath = OptionalPath(Il2CppInteropCliPath),
-            ZipAlignPath = OptionalPath(ZipAlignPath),
-            ApkSignerPath = OptionalPath(ApkSignerPath),
-            Signing = Signing is null
-                ? null
-                : Signing with { KeystorePath = FullPath(Signing.KeystorePath, "Keystore") }
+            InputPath = RequestPaths.Optional(InputPath) ?? throw new ArgumentException("Input is required."),
+            OutputPath = RequestPaths.Optional(OutputPath), ReleasePath = RequestPaths.Optional(ReleasePath),
+            DeploymentPath = RequestPaths.Optional(DeploymentPath), InteropInputPath = RequestPaths.Optional(InteropInputPath),
+            PostProcessing = PostProcessing.NormalizeAndValidate()
         };
-        var inputIsFile = File.Exists(normalized.InputPath);
-        var inputIsDirectory = Directory.Exists(normalized.InputPath);
-        if (!inputIsFile && !inputIsDirectory)
-            throw new ArgumentException($"Input APK or directory was not found at '{normalized.InputPath}'.");
-        normalized = normalized with
+        bool directory = Directory.Exists(request.InputPath);
+        if (!directory && !File.Exists(request.InputPath))
+            throw new ArgumentException($"Input APK or directory was not found at '{request.InputPath}'.");
+        request = request with { InputKind = directory ? PatchInputKind.Directory : PatchInputKind.Apk };
+        if (directory)
         {
-            InputKind = inputIsDirectory ? PatchInputKind.Directory : PatchInputKind.Apk
-        };
-        var comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (inputIsDirectory)
-        {
-            if (normalized.OutputPath is not null)
+            PathSafety.RejectLinks(request.InputPath);
+            if (request.OutputPath is not null)
                 throw new ArgumentException("Directory input is patched in place and does not accept --output.");
-            if (normalized.AlignApk || normalized.ZipAlignPath is not null ||
-                normalized.Signing is not null || normalized.ApkSignerPath is not null)
-            {
-                throw new ArgumentException(
-                    "Directory input does not support APK alignment or signing options.");
-            }
+            if (request.PostProcessing != new ApkPostProcessingOptions())
+                throw new ArgumentException("Directory input does not support APK alignment or signing options.");
+        }
+        else if (request.OutputPath is null)
+            throw new ArgumentException("APK input requires an output APK path.");
+        if (request.DeploymentPath is { } deployment && !Directory.Exists(deployment))
+            throw new DirectoryNotFoundException($"Deployment directory was not found at '{deployment}'.");
+        if (request.InteropInputPath is { } interop)
+        {
+            _ = InteropInput.Assemblies(interop);
+            if (request.Generation is not null)
+                throw new ArgumentException("Existing --interop DLLs cannot be combined with generation/export options.");
         }
         else
         {
-            if (normalized.OutputPath is null)
-                throw new ArgumentException("APK input requires an output APK path.");
-            if (string.Equals(normalized.InputPath, normalized.OutputPath, comparison))
-                throw new ArgumentException("The output APK must not overwrite the input APK.");
-            if (Directory.Exists(normalized.OutputPath))
-                throw new ArgumentException($"Output APK path '{normalized.OutputPath}' is a directory.");
-            if (normalized.ZipAlignPath is not null && !normalized.AlignApk)
-                throw new ArgumentException("--zipalign requires --align.");
-            if (normalized.ApkSignerPath is not null && normalized.Signing is null)
-                throw new ArgumentException("--apksigner requires --keystore.");
+            var generation = request.Generation ?? new InteropRequest();
+            if (generation.InputPath is { } input && Path.GetRelativePath(request.InputPath, Path.GetFullPath(input)) != ".")
+                throw new ArgumentException("Composed generation must use the patch input.");
+            request = request with
+            {
+                Generation = (generation with { InputPath = request.InputPath }).NormalizeAndValidate()
+            };
         }
-        if (normalized.DeploymentPath is not null &&
-            !Directory.Exists(normalized.DeploymentPath))
-        {
-            throw new DirectoryNotFoundException(
-                $"Deployment directory was not found at '{normalized.DeploymentPath}'.");
-        }
-        if (normalized.InteropInputPath is { } interop)
-        {
-            _ = InteropInput.Assemblies(interop);
-            if (normalized.InteropOutputPath is not null || normalized.GameAssemblyPath is not null ||
-                normalized.MetadataPath is not null || normalized.UnityVersion is not null ||
-                normalized.UnityLibrariesPath is not null || normalized.Cpp2IlPath is not null ||
-                normalized.Il2CppInteropCliPath is not null)
-                throw new ArgumentException("Existing --interop DLLs cannot be combined with generation/export options.");
-            if (normalized.OutputPath is { } output && PathSafety.Contains(interop, output))
-                throw new ArgumentException("Output APK must not overwrite an Interop input.");
-        }
-        if (normalized.InteropInputPath is null && !string.IsNullOrWhiteSpace(normalized.UnityVersion))
-            UnityDependenciesResolver.NormalizeVersion(normalized.UnityVersion);
-        if (normalized.Il2CppInteropCliPath is { } interopCliPath)
-        {
-            if (!File.Exists(interopCliPath))
-                throw new ArgumentException($"Il2CppInterop CLI was not found at '{interopCliPath}'.");
-            if (!string.Equals(Path.GetExtension(interopCliPath), ".dll", StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("The Il2CppInterop CLI override must be a managed .dll file.");
-        }
-        if (normalized.Signing is { } signing &&
-            (string.IsNullOrWhiteSpace(signing.StorePassword) ||
-             string.IsNullOrWhiteSpace(signing.KeyAlias)))
-        {
-            throw new ArgumentException("Signing requires a keystore password and key alias.");
-        }
-        if (normalized.Signing is { } normalizedSigning &&
-            !File.Exists(normalizedSigning.KeystorePath))
-        {
-            throw new ArgumentException(
-                $"Signing keystore was not found at '{normalizedSigning.KeystorePath}'.");
-        }
-        if (normalized.InteropOutputPath is { } export)
-        {
-            RequestPaths.ValidateExport(export,
-                normalized.InputPath, normalized.ReleasePath, normalized.DeploymentPath,
-                normalized.GameAssemblyPath, normalized.MetadataPath, normalized.UnityLibrariesPath,
-                normalized.Cpp2IlPath, normalized.Il2CppInteropCliPath,
-                normalized.ZipAlignPath, normalized.ApkSignerPath,
-                normalized.Signing?.KeystorePath, normalized.OutputPath, normalized.ToolCacheRoot);
-        }
-        if (inputIsDirectory) PathSafety.RejectLinks(normalized.InputPath);
-        return normalized;
+        var processing = request.PostProcessing;
+        var inputs = new[] { request.InputPath, request.ReleasePath, request.DeploymentPath, request.InteropInputPath,
+            request.Generation?.GameAssemblyPath, request.Generation?.MetadataPath, request.Generation?.UnityLibrariesPath,
+            request.Generation?.Cpp2IlPath, request.Generation?.Il2CppInteropCliPath,
+            request.Generation?.Il2CppInteropCliPath is { } generator ? Path.GetDirectoryName(generator) : null, processing.ZipAlignPath,
+            processing.ApkSignerPath, processing.Signing?.KeystorePath };
+        if (request.Generation?.OutputPath is { } export)
+            RequestPaths.ValidateExport(export, inputs.Append(request.OutputPath).Append(ToolCachePaths.Root).ToArray());
+        if (request.OutputPath is { } output)
+            RequestPaths.ValidateOutputFile(output, inputs);
+        return request;
     }
 }
 
-public sealed record PatchResult(
-    string OutputPath,
-    string? Sha256,
-    string? UnityVersion,
-    bool ModifiedInPlace);
-
-public enum PatcherMessageKind
-{
-    Stage,
-    ToolOutput,
-    Warning
-}
-
+public sealed record PatchResult(string OutputPath, string? Sha256, string? UnityVersion, bool ModifiedInPlace);
+public enum PatcherMessageKind { Stage, ToolOutput, Warning }
 public sealed record PatcherMessage(PatcherMessageKind Kind, string Text);

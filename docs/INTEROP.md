@@ -22,8 +22,9 @@ Interop output is a published copy of newly generated DLLs and the host-side
 interop-manifest.json. inject --interop or patch --interop consumes an existing
 DLL directory without this manifest, version detection or generation tools.
 It cannot be combined with generation overrides or --interop-output. Replacement occurs
-only after successful generation. The manifest records source/tool/CLI/dependency
-identity for diagnosis and Mod development; it is not injected into layout 9.
+only after successful generation. The manifest records Unity/tool versions,
+dependency origins and assembly names/sizes for Mod development; it is not injected
+into layout 9 and does not hash game inputs, generators or generated DLLs.
 The entire export directory is replaced. It must not overlap game, deployment,
 dependency or other input/output paths; linked destinations are rejected.
 
@@ -44,7 +45,7 @@ is `.tools/UnityDependencies` beside the Patcher executable, shared with patchin
 Local references and cached/explicit
 Cpp2IL are necessary for offline generation.
 Custom generators must produce valid DLLs; Patcher no longer repairs generated
-metadata. Generation records and their file hashes are produced only for explicit
+metadata. Lightweight generation records are produced only for explicit
 exports. [Workflow](WORKFLOW.md) covers generation without a Loader and direct
 binary/metadata inputs.
 

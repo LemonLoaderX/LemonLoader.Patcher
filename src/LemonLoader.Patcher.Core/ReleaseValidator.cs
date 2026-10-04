@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 
+namespace LemonLoader.Patcher.Core;
+
 internal static class ReleaseValidator
 {
     private const string ManifestName = "lemonloader-release.json";

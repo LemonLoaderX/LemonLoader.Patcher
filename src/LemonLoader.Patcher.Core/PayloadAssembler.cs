@@ -1,6 +1,8 @@
 using System.IO.Compression;
 using System.Text.Json;
 
+namespace LemonLoader.Patcher.Core;
+
 internal sealed record PayloadSource(
     string ReleaseRoot,
     string InteropRoot,
