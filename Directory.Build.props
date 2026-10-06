@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <Version>1.1.2</Version>
-    <BundledIl2CppInteropRevision>bdcf72ef046090e3236e6a9bd80b3f00f9e344f5</BundledIl2CppInteropRevision>
+    <BundledIl2CppInteropRevision>2a16370dd441c496ca5c99cd61a7af9e87caa5d3</BundledIl2CppInteropRevision>
     <BundledIl2CppInteropRepositoryUrl>https://github.com/LemonLoaderX/Il2CppInterop.git</BundledIl2CppInteropRepositoryUrl>
   </PropertyGroup>
   <ItemGroup>
