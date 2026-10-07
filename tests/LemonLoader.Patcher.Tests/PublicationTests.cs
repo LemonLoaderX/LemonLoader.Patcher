@@ -89,7 +89,8 @@ internal static class PublicationTests
             using (var cancel = new CancellationTokenSource())
             {
                 AssertThrows<OperationCanceledException>(() => DirectoryInjector.Apply(
-                    cancelledGame, cancelledOverlay, null, cancel.Token, copyBackup: (input, backup, token) =>
+                    cancelledGame, (staged, token) => DirectoryPublisher.CopyDirectory(cancelledOverlay, staged, token),
+                    null, cancel.Token, copyBackup: (input, backup, token) =>
                     {
                         DirectoryPublisher.CopyFile(input, backup, token);
                         cancel.Cancel();
@@ -98,6 +99,28 @@ internal static class PublicationTests
             AssertEqual("original main", File.ReadAllText(originalLibrary));
             AssertTrue(!Directory.Exists(Path.Combine(cancelledGame, "assets")), "Cancellation did not roll back earlier files.");
             AssertTrue(!Directory.GetDirectories(cancelledGame, ".lemonloader-patcher-*").Any(), "Cancelled transaction was not cleaned.");
+
+            foreach (var cancelPreparation in new[] { false, true })
+            {
+                using var cancel = new CancellationTokenSource();
+                void PreparePartialPayload(string staged, CancellationToken token)
+                {
+                    var partial = GamePackageLayout.FilePath(staged, GamePackageLayout.MainLibrary);
+                    Directory.CreateDirectory(Path.GetDirectoryName(partial)!);
+                    File.WriteAllText(partial, "partially extracted main");
+                    if (cancelPreparation) cancel.Cancel();
+                    else throw new IOException("Injected payload extraction failure.");
+                }
+                if (cancelPreparation)
+                    AssertThrows<OperationCanceledException>(() => DirectoryInjector.Apply(
+                        cancelledGame, PreparePartialPayload, null, cancel.Token));
+                else
+                    AssertThrows<IOException>(() => DirectoryInjector.Apply(
+                        cancelledGame, PreparePartialPayload, null, cancel.Token));
+                AssertEqual("original main", File.ReadAllText(originalLibrary));
+                AssertTrue(!Directory.GetDirectories(cancelledGame, ".lemonloader-patcher-*").Any(),
+                    "Interrupted payload preparation left a transaction behind.");
+            }
 
             var source = Path.Combine(root, "source");
             Directory.CreateDirectory(source);
@@ -143,8 +166,11 @@ internal static class PublicationTests
                 AssertEqual(0, process.ExitCode);
                 try
                 {
-                    AssertThrows<InvalidDataException>(() => DirectoryInjector.Apply(linkedGame, overlay, null));
+                    AssertThrows<InvalidDataException>(() => DirectoryInjector.Apply(linkedGame,
+                        (staged, token) => DirectoryPublisher.CopyDirectory(overlay, staged, token), null));
                     AssertTrue(!File.Exists(Path.Combine(outside, "probe.txt")), "Injection traversed a junction.");
+                    AssertTrue(!Directory.GetDirectories(linkedGame, ".lemonloader-patcher-*").Any(),
+                        "Rejected payload targets left a transaction behind.");
                 }
                 finally { Directory.Delete(Path.Combine(linkedGame, "assets")); }
             }

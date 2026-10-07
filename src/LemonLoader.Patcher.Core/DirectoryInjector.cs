@@ -4,12 +4,12 @@ internal static class DirectoryInjector
 {
     public static void Apply(
         string gameRoot,
-        string overlayRoot,
+        Action<string, CancellationToken> preparePayload,
         IProgress<PatcherMessage>? progress,
         CancellationToken cancellationToken = default,
         Action<string, string, CancellationToken>? copyBackup = null)
     {
-        ValidateTargets(gameRoot, overlayRoot);
+        PathSafety.RejectLinks(gameRoot);
         var transactionRoot = Path.Combine(
             gameRoot,
             $".lemonloader-patcher-{Guid.NewGuid():N}");
@@ -20,14 +20,20 @@ internal static class DirectoryInjector
         var committed = false;
         var operationFailed = false;
         var preserveTransaction = false;
+        var publishing = false;
         try
         {
-            DirectoryPublisher.CopyDirectory(overlayRoot, stagedRoot, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(stagedRoot);
+            preparePayload(stagedRoot, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateTargets(gameRoot, stagedRoot);
             var stagedFiles = Directory.GetFiles(stagedRoot, "*", SearchOption.AllDirectories)
                 .OrderBy(
                     path => Path.GetRelativePath(stagedRoot, path).Replace('\\', '/'),
                     StringComparer.Ordinal)
                 .ToArray();
+            publishing = true;
             foreach (var stagedPath in stagedFiles)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -53,6 +59,7 @@ internal static class DirectoryInjector
         catch (Exception failure)
         {
             operationFailed = true;
+            if (!publishing) throw;
             if (TryRollBack(installed, createdDirectories) is { } rollbackFailure)
             {
                 preserveTransaction = true;

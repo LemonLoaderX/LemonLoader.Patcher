@@ -19,6 +19,10 @@ internal static class PayloadAssembler
     };
 
     public static void MergeApk(string apkPath, PayloadSource source, CancellationToken cancellationToken = default)
+        => MergePayload(apkPath, source, CompressionLevel.Optimal, cancellationToken);
+
+    private static void MergePayload(string apkPath, PayloadSource source,
+        CompressionLevel compression, CancellationToken cancellationToken)
     {
         var payload = ReadPayloadDescriptor(GamePackageLayout.FilePath(
             source.ReleaseRoot,
@@ -26,7 +30,7 @@ internal static class PayloadAssembler
         using var archive = ZipFile.Open(apkPath, ZipArchiveMode.Update);
         ValidateUniqueEntries(archive);
         RejectExistingLoaderPayload(archive);
-        AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets", cancellationToken);
+        AddTree(archive, Path.Combine(source.ReleaseRoot, "assets"), "assets", compression, cancellationToken);
         ValidateRuntimeEntries(archive);
         AddNativeTree(archive, Path.Combine(source.ReleaseRoot, "lib"), cancellationToken);
         foreach (var dll in InteropInput.Assemblies(source.InteropRoot))
@@ -34,15 +38,15 @@ internal static class PayloadAssembler
             AddFile(
                 archive,
                 dll,
-                $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}", cancellationToken: cancellationToken);
+                $"{AndroidPayloadContract.InteropRoot}/{Path.GetFileName(dll)}", compression, cancellationToken: cancellationToken);
         }
         if (source.DeploymentPath is not null)
-            AddDeploymentRoot(archive, source.DeploymentPath, cancellationToken);
+            AddDeploymentRoot(archive, source.DeploymentPath, compression, cancellationToken);
         ValidateDeploymentEntries(archive);
         RefreshPayloadDescriptor(
             archive,
             payload,
-            source.DeploymentPolicies);
+            source.DeploymentPolicies, compression);
         ValidateUniqueEntries(archive);
     }
 
@@ -71,14 +75,16 @@ internal static class PayloadAssembler
             Path.GetTempPath(),
             $"lemonloader-directory-patch-{Guid.NewGuid():N}");
         var stagingApk = Path.Combine(workRoot, "payload.apk");
-        var overlayRoot = Path.Combine(workRoot, "overlay");
         Directory.CreateDirectory(workRoot);
         try
         {
             var originalEntries = CreateDirectorySeedApk(gameRoot, stagingApk);
-            MergeApk(stagingApk, source, cancellationToken);
-            ExtractDirectoryOverlay(stagingApk, overlayRoot, originalEntries, cancellationToken);
-            DirectoryInjector.Apply(gameRoot, overlayRoot, progress, cancellationToken);
+            // The staging ZIP is immediately extracted into a directory. Keep the
+            // common validation path without compressing and inflating its payload.
+            MergePayload(stagingApk, source, CompressionLevel.NoCompression, cancellationToken);
+            DirectoryInjector.Apply(gameRoot,
+                (stagedRoot, token) => ExtractDirectoryOverlay(stagingApk, stagedRoot, originalEntries, token),
+                progress, cancellationToken);
         }
         finally
         {
@@ -146,7 +152,7 @@ internal static class PayloadAssembler
     private static void RefreshPayloadDescriptor(
         ZipArchive archive,
         PayloadDescriptor descriptor,
-        DeploymentPolicyOptions deploymentPolicies)
+        DeploymentPolicyOptions deploymentPolicies, CompressionLevel compression)
     {
         const string prefix = AndroidPayloadContract.DeploymentRoot + "/";
         var paths = archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) &&
@@ -159,7 +165,7 @@ internal static class PayloadAssembler
             policy = DeploymentPolicyOptions.ToManifestValue(deploymentPolicies.Resolve(path))
         }).Where(file => file.policy != "seed").ToArray();
         archive.GetEntry(PayloadEntry)?.Delete();
-        var entry = archive.CreateEntry(PayloadEntry, CompressionLevel.Optimal);
+        var entry = archive.CreateEntry(PayloadEntry, compression);
         using var output = entry.Open();
         JsonSerializer.Serialize(output, new
         {
@@ -272,14 +278,15 @@ internal static class PayloadAssembler
         }
     }
 
-    private static void AddTree(ZipArchive archive, string root, string prefix, CancellationToken cancellationToken)
+    private static void AddTree(ZipArchive archive, string root, string prefix,
+        CompressionLevel compression, CancellationToken cancellationToken)
     {
         foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
         {
             AddFile(
                 archive,
                 file,
-                $"{prefix}/{Path.GetRelativePath(root, file).Replace('\\', '/')}", cancellationToken: cancellationToken);
+                $"{prefix}/{Path.GetRelativePath(root, file).Replace('\\', '/')}", compression, cancellationToken: cancellationToken);
         }
     }
 
@@ -291,12 +298,13 @@ internal static class PayloadAssembler
             AddFile(
                 archive,
                 file,
-                name,
+                name, CompressionLevel.NoCompression,
                 replaceExisting: name == GamePackageLayout.MainLibrary, cancellationToken: cancellationToken);
         }
     }
 
-    private static void AddDeploymentRoot(ZipArchive archive, string sourcePath, CancellationToken cancellationToken)
+    private static void AddDeploymentRoot(ZipArchive archive, string sourcePath,
+        CompressionLevel compression, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(sourcePath))
             throw new FileNotFoundException(
@@ -312,7 +320,7 @@ internal static class PayloadAssembler
         {
             var relativePath = Path.GetRelativePath(sourcePath, file).Replace('\\', '/');
             ValidateDeploymentRootPath(relativePath);
-            AddFile(archive, file, $"{AndroidPayloadContract.DeploymentRoot}/{relativePath}", cancellationToken: cancellationToken);
+            AddFile(archive, file, $"{AndroidPayloadContract.DeploymentRoot}/{relativePath}", compression, cancellationToken: cancellationToken);
         }
     }
 
@@ -338,6 +346,7 @@ internal static class PayloadAssembler
         ZipArchive archive,
         string path,
         string name,
+        CompressionLevel compression,
         bool replaceExisting = false,
         CancellationToken cancellationToken = default)
     {
@@ -350,11 +359,7 @@ internal static class PayloadAssembler
                 $"Only '{GamePackageLayout.MainLibrary}' may be replaced.");
         }
         existing?.Delete();
-        var entry = archive.CreateEntry(
-            name,
-            name.StartsWith("lib/", StringComparison.Ordinal)
-                ? CompressionLevel.NoCompression
-                : CompressionLevel.Optimal);
+        var entry = archive.CreateEntry(name, compression);
         using var input = File.OpenRead(path);
         using var output = entry.Open();
         DirectoryPublisher.CopyStream(input, output, cancellationToken);

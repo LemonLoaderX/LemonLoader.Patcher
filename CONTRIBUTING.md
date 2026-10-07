@@ -5,6 +5,12 @@ ZIP handling, directory handling, Interop generation, payload assembly, and
 optional post-processing as distinct responsibilities; do not duplicate patch
 behavior in a front end.
 
+Directory injection shares payload validation through an uncompressed temporary
+ZIP, extracted directly into the transaction's staging directory on the target
+volume. Validate every destination before publishing files. APK injection keeps its
+distribution compression policy. Preserve output bytes, cancellation and rollback
+when optimizing either path.
+
 ## Development workflow
 
 Use PowerShell 7 and a stable .NET 10 SDK. The product's global.json selects the
