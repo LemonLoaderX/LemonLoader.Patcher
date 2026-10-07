@@ -1,8 +1,9 @@
 # Patching games
 
 Packages require .NET 10. Windows executable: ./LemonLoader.Patcher.CLI.exe;
-Linux: CLI/LemonLoader.Patcher.CLI. Use `patch --help` for the complete option
-contract. GUI/LemonLoader.Patcher.GUI exposes the same Core pipeline.
+Linux: ./LemonLoader.Patcher.CLI. Use `patch --help` for the complete option
+contract. The separately packaged GUI exposes the same Core pipeline, with
+LemonLoader.Patcher.GUI.exe (Windows) or LemonLoader.Patcher.GUI (Linux) at archive root.
 GUI managed dependencies are bundled into its executable; adjacent native graphics
 libraries and Tools/Il2CppInterop remain required. Move the whole extracted directory.
 
