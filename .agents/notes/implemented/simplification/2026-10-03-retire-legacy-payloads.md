@@ -11,19 +11,29 @@ target, yet these branches still complicate Patcher and its fixtures.
 ## Decision
 
 Release validation, APK assembly and the explicit APK verifier support only
-layout 9 with API26+ CoreCLR. Android requires embedded crypto metadata; Bionic
+layout 9 with API26+ CoreCLR. Android requires embedded crypto helpers; Bionic
 requires its private OpenSSL inputs. Unsupported layouts fail before assembly.
 DEX promotion and game DEX/smali enumeration are removed; directory injection
 requires only the native layout and preserves game code. Deployment emits only
 non-seed path/policy overrides. No tree hashes, revision or runtime/Interop audit
 JSON is copied or recomputed for injection.
+An all-seed payload omits deploymentFiles rather than emitting an empty list.
 
 Release hashes, ZIP/path/duplicate checks, ABI/native-collision validation and
 runtime completeness remain. Required CoreLib/JIT/engine/crypto inputs must be
 present and nonempty. The two crypto implementations cannot be mixed. Unknown
 additive metadata/files are tolerated when they do not violate those contracts.
 Installed assets remain editable without hash regeneration or startup scans.
-Current format numbers remain unchanged. Historical tools remain in Git history.
+Installed layout remains 9. Release envelopes accept formats 2 and 3: format 2
+retains its existing metadata consistency checks, while format 3 derives ABI,
+CoreCLR engine, crypto and game-independent layout from the payload RID and
+verified inventory. The engine hash no longer needs a duplicate top-level field.
+Version/source and minimum API remain required. Loader owns the
+[field contract](https://github.com/LemonLoaderX/LemonLoader/blob/main/docs/android/ARTIFACTS.md).
+This preserves already published archives without requiring redundant metadata
+from new producers. Patcher 2.0.0 cannot read format 3; the explicit envelope
+version lets it reject new archives before trying removed required properties.
+Historical tools remain in Git history.
 
 Main installation rationale belongs to Loader docs; this local note records the
 Patcher contract so the repository remains independently maintainable.

@@ -42,3 +42,6 @@ published files, not empty directory scaffolding.
 Cleanup is restricted to this product. It preserves source caches, shared
 dependencies, diagnostic fixtures, private/unknown Output directories and
 published archives by default. See [maintenance commands](../CONTRIBUTING.md#cleanup).
+Script tests clean their own unique fixtures in finally through
+`common/TestFixtures.ps1`; synthetic Git data and links belong to those fixtures,
+and link targets are never followed. This does not broaden product cleanup scope.

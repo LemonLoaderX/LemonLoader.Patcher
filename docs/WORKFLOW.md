@@ -55,6 +55,12 @@ Injection needs no Unity version, reference libraries, Cpp2IL or generator.
 DLLs must match the exact game. No Patcher manifest/game identity is required.
 inject rejects generation options; patch --interop uses the same injection path.
 
+Current Patcher source accepts Release manifest formats 2 and 3 with installed
+layout 9. Format 3 removes redundant build/layout declarations; the payload,
+runtime RID and verified file inventory supply those facts. Published Patcher
+2.0.0 accepts format 2 only. Use a Patcher supporting format 3 for newly staged
+Loader archives; existing format-2 archives remain supported.
+
 For scripts or ZIP-entry editors, retain an original APK and apply this mapping:
 
 | Source | APK destination |
@@ -89,6 +95,7 @@ Optional non-seed policies can be written directly:
 Paths are relative to deployment; undeclared files use seed. If formatVersion is
 present it must be 9. No revision/hash regeneration is needed. Profiles/wildcards
 are Patcher conveniences expanded to this ordinary path/policy list.
+Patcher omits the policy list when all files use the default seed behavior.
 
 Validate downloads/Release, ZIP paths, native-name collisions and runtime
 completeness before mutation. Use supported ARM64 libmain startup layout and

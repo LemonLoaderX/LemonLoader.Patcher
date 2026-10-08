@@ -19,13 +19,8 @@ internal static class ReleaseValidator
 
         using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var manifest = document.RootElement;
-        if (manifest.GetProperty("formatVersion").GetInt32() != 2)
+        if (manifest.GetProperty("formatVersion").GetInt32() is not (2 or 3))
             throw new InvalidDataException("Unsupported LemonLoader Release manifest format.");
-        var layoutVersion = manifest.GetProperty("assetLayoutVersion").GetInt32();
-        if (layoutVersion != AssetLayoutVersion)
-            throw new InvalidDataException("Unsupported LemonLoader Android asset layout.");
-        if (manifest.GetProperty("gameAssembliesIncluded").GetBoolean())
-            throw new InvalidDataException("The LemonLoader Release contains game-specific assemblies.");
 
         var expectedFiles = new HashSet<string>(StringComparer.Ordinal);
         var verifiedFiles = new Dictionary<string, (long Size, string Hash)>(StringComparer.Ordinal);
@@ -87,25 +82,16 @@ internal static class ReleaseValidator
         IReadOnlyDictionary<string, (long Size, string Hash)> verifiedFiles)
     {
         var runtimeVersion = releaseManifest.GetProperty("managedRuntimeVersion").GetString();
-        var configuration = releaseManifest.GetProperty("configuration").GetString();
         var runtimeRevision = releaseManifest.GetProperty("managedRuntimeSourceRevision").GetString();
-        var runtimeEngineFile = releaseManifest.GetProperty("managedRuntimeEngineFile").GetString();
-        var runtimeEngineHash = releaseManifest.GetProperty("managedRuntimeEngineSha256").GetString();
         if (string.IsNullOrWhiteSpace(runtimeVersion) ||
-            configuration is not ("Debug" or "Release") ||
             runtimeRevision is null || runtimeRevision.Length != 40 ||
-            runtimeRevision.Any(character => !Uri.IsHexDigit(character)) ||
-            runtimeEngineFile != "libcoreclr.so" ||
-            runtimeEngineHash is null || !IsSha256(runtimeEngineHash))
+            runtimeRevision.Any(character => !Uri.IsHexDigit(character)))
             throw new InvalidDataException("The Release does not contain valid managed runtime source provenance.");
 
-        var cryptoDexMode = AndroidPayloadContract.ReadCryptoDexMode(releaseManifest);
-        if (releaseManifest.GetProperty("managedRuntimeBackend").GetString() != "coreclr" ||
-            !releaseManifest.TryGetProperty("runtimeRid", out var runtimeRid) ||
+        if (!releaseManifest.TryGetProperty("runtimeRid", out var runtimeRid) ||
             runtimeRid.GetString() is not ("android-arm64" or "linux-bionic-arm64") ||
             !releaseManifest.TryGetProperty("minimumAndroidApi", out var minimumApi) ||
-            minimumApi.ValueKind != JsonValueKind.Number || !minimumApi.TryGetInt32(out var api) || api < 26 ||
-            (runtimeRid.GetString() == "android-arm64" ? cryptoDexMode != "embedded" : cryptoDexMode is not null))
+            minimumApi.ValueKind != JsonValueKind.Number || !minimumApi.TryGetInt32(out var api) || api < 26)
             throw new InvalidDataException("Layout 9 requires an API26+ CoreCLR runtime with matching cryptography.");
 
         var invalidAsset = files.FirstOrDefault(path =>
@@ -138,12 +124,10 @@ internal static class ReleaseValidator
             throw new InvalidDataException("A game-independent Release contains deployment or game Interop inputs.");
 
         var sharedRuntimeRoot = $"{AndroidPayloadContract.DotnetRoot}/shared/Microsoft.NETCore.App/{runtimeVersion}";
-        var enginePath = $"{sharedRuntimeRoot}/{runtimeEngineFile}";
-        if (!verifiedFiles.TryGetValue(enginePath, out var engine) || engine.Size == 0 ||
-            !string.Equals(engine.Hash, runtimeEngineHash, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("The Release managed runtime engine is missing or differs from its source provenance.");
-        foreach (var name in new[] { "System.Private.CoreLib.dll", "libclrjit.so" })
+        foreach (var name in new[] { "libcoreclr.so", "System.Private.CoreLib.dll", "libclrjit.so" })
             RequireRuntimeFile($"{sharedRuntimeRoot}/{name}");
+        if (releaseManifest.GetProperty("formatVersion").GetInt32() == 2)
+            ValidateFormat2Metadata(releaseManifest, verifiedFiles[$"{sharedRuntimeRoot}/libcoreclr.so"].Hash);
         foreach (var name in new[] { "MelonLoader.dll", "MelonLoader.NativeHost.dll" })
             RequireRuntimeFile($"{AndroidPayloadContract.LoaderRoot}/net6/{name}");
         RequireRuntimeFile($"{AndroidPayloadContract.LoaderRoot}/Dependencies/SupportModules/Il2Cpp.dll");
@@ -172,6 +156,27 @@ internal static class ReleaseValidator
         }
     }
 
+    private static void ValidateFormat2Metadata(JsonElement manifest, string engineHash)
+    {
+        // Published format-2 archives retain their original consistency checks.
+        // Format 3 derives these facts from layout 9, the RID and the verified files.
+        if (manifest.GetProperty("assetLayoutVersion").GetInt32() != AssetLayoutVersion)
+            throw new InvalidDataException("Unsupported LemonLoader Android asset layout.");
+        if (manifest.GetProperty("gameAssembliesIncluded").GetBoolean())
+            throw new InvalidDataException("The LemonLoader Release contains game-specific assemblies.");
+        if (manifest.GetProperty("configuration").GetString() is not ("Debug" or "Release") ||
+            manifest.GetProperty("managedRuntimeEngineFile").GetString() != "libcoreclr.so" ||
+            !string.Equals(manifest.GetProperty("managedRuntimeEngineSha256").GetString(), engineHash,
+                StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The Release managed runtime engine differs from its source provenance.");
+
+        var cryptoDexMode = AndroidPayloadContract.ReadCryptoDexMode(manifest);
+        if (manifest.GetProperty("managedRuntimeBackend").GetString() != "coreclr" ||
+            (manifest.GetProperty("runtimeRid").GetString() == "android-arm64"
+                ? cryptoDexMode != "embedded" : cryptoDexMode is not null))
+            throw new InvalidDataException("Layout 9 requires CoreCLR with matching cryptography.");
+    }
+
     private static string ValidateRelativePath(string root, string relativePath)
     {
         if (string.IsNullOrWhiteSpace(relativePath) ||
@@ -195,9 +200,6 @@ internal static class ReleaseValidator
             throw new InvalidDataException($"Release manifest path '{relativePath}' escapes the Release root.");
         return fullPath;
     }
-
-    private static bool IsSha256(string value) =>
-        value.Length == 64 && value.All(Uri.IsHexDigit);
 }
 
 internal sealed record ReleaseValidationResult(string ReleaseRoot);

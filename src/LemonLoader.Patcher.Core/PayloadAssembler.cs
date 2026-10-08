@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace LemonLoader.Patcher.Core;
 
@@ -15,6 +16,7 @@ internal static class PayloadAssembler
     private static readonly JsonSerializerOptions PayloadJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         WriteIndented = true
     };
 
@@ -171,7 +173,7 @@ internal static class PayloadAssembler
         {
             formatVersion = AndroidPayloadContract.FormatVersion,
             runtimeRid = descriptor.RuntimeRid,
-            deploymentFiles = policies
+            deploymentFiles = policies.Length == 0 ? null : policies
         }, PayloadJsonOptions);
     }
 

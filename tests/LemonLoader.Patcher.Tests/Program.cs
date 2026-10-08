@@ -15,8 +15,7 @@ if (args is ["--validate-release", var releaseArchive])
         ZipFile.ExtractToDirectory(Path.GetFullPath(releaseArchive), root);
         ReleaseValidator.Validate(root);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "lemonloader-release.json")));
-        if (manifest.RootElement.TryGetProperty("coreClrCryptoDexMode", out var mode) &&
-            mode.GetString() == "embedded" &&
+        if (manifest.RootElement.GetProperty("runtimeRid").GetString() == "android-arm64" &&
             Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
                 .Any(path => Path.GetExtension(path).Equals(".dex", StringComparison.OrdinalIgnoreCase)))
         {
@@ -448,8 +447,9 @@ static Task TestReleaseValidationAsync()
     try
     {
         foreach (var rid in new[] { "android-arm64", "linux-bionic-arm64" })
+        foreach (var format in new[] { 2, 3 })
         {
-            var release = CreateReleaseTree(root, rid);
+            var release = CreateReleaseTree(root, rid, format);
             ReleaseValidator.Validate(release);
             var manifestPath = Path.Combine(release, "lemonloader-release.json");
             var original = File.ReadAllText(manifestPath);
@@ -461,15 +461,22 @@ static Task TestReleaseValidationAsync()
                 AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(release));
                 File.WriteAllText(manifestPath, original);
             }
-            RejectMetadata("assetLayoutVersion", 8);
-            RejectMetadata("managedRuntimeBackend", "monovm-sgen");
-            RejectMetadata("managedRuntimeBackend", "unknown");
+            RejectMetadata("formatVersion", 4);
             RejectMetadata("runtimeRid", "linux-x64");
             RejectMetadata("minimumAndroidApi", 25);
             RejectMetadata("managedRuntimeSourceRevision", "invalid");
-            RejectMetadata("managedRuntimeEngineSha256", new string('0', 64));
-            RejectMetadata("coreClrCryptoDexMode", "external");
-            RejectMetadata("gameAssembliesIncluded", true);
+            RejectMetadata("managedRuntimeVersion", "missing");
+            if (format == 2)
+            {
+                RejectMetadata("assetLayoutVersion", 8);
+                RejectMetadata("managedRuntimeBackend", "monovm-sgen");
+                RejectMetadata("managedRuntimeBackend", "unknown");
+                RejectMetadata("managedRuntimeEngineFile", "libmonosgen-2.0.so");
+                RejectMetadata("managedRuntimeEngineSha256", new string('0', 64));
+                RejectMetadata("configuration", "unknown");
+                RejectMetadata("coreClrCryptoDexMode", "external");
+                RejectMetadata("gameAssembliesIncluded", true);
+            }
 
             var manifest = JsonNode.Parse(original)!;
             manifest["producer"] = "future";
@@ -531,6 +538,13 @@ static Task TestReleaseValidationAsync()
             File.WriteAllText(manifestPath, duplicate.ToJsonString());
             AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(release));
             File.WriteAllText(manifestPath, current);
+            var bootstrap = Path.Combine(release, "lib/arm64-v8a/libmain.so");
+            var bootstrapBytes = File.ReadAllBytes(bootstrap);
+            var corruptBytes = (byte[])bootstrapBytes.Clone();
+            corruptBytes[0] ^= 1;
+            File.WriteAllBytes(bootstrap, corruptBytes);
+            AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(release));
+            File.WriteAllBytes(bootstrap, bootstrapBytes);
             File.AppendAllText(Path.Combine(release, "lib/arm64-v8a/libmain.so"), "corrupt");
             AssertThrows<InvalidDataException>(() => ReleaseValidator.Validate(release));
         }
@@ -583,6 +597,13 @@ static async Task TestMinimalPayloadAsync(string? verificationScript)
             ReleaseValidator.Validate(release);
             var interop = CreateInteropTree(root);
             File.Delete(Path.Combine(interop, InteropGenerationManifest.FileName));
+            var seedApk = Path.Combine(root, $"seed-{rid}.apk");
+            CreateZip(seedApk, new Dictionary<string, string> { ["lib/arm64-v8a/libmain.so"] = "game-main" });
+            MergeApk(seedApk, release, interop, null);
+            using (var seedArchive = ZipFile.OpenRead(seedApk))
+            using (var seedPayload = JsonDocument.Parse(ReadZipEntry(seedArchive, AndroidPayloadContract.PayloadManifestPath)))
+                AssertTrue(!seedPayload.RootElement.TryGetProperty("deploymentFiles", out _),
+                    "Default deployment must omit empty policy metadata.");
             var deployment = Path.Combine(root, "deployment-" + rid);
             WritePayload(deployment, "Mods/Example.dll", "mod");
             WritePayload(deployment, "Mods/Optional.dll", "optional");

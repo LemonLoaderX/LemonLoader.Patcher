@@ -21,24 +21,29 @@ foreach ($script in Get-ChildItem -LiteralPath $PSScriptRoot -Recurse -File) {
 }
 if ($failures.Count) { throw ($failures -join "`n") }
 $fixture = Join-Path $repositoryRoot ('Output/Tests/ScriptHelpers/' + [Guid]::NewGuid().ToString('N'))
-[void][IO.Directory]::CreateDirectory($fixture)
-Assert-ChildPath -Path (Join-Path $fixture 'child') -Parent $fixture
-foreach ($path in @($fixture, "$fixture-other/child")) {
+. (Join-Path $PSScriptRoot 'common/TestFixtures.ps1')
+try {
+    [void][IO.Directory]::CreateDirectory($fixture)
+    Assert-ChildPath -Path (Join-Path $fixture 'child') -Parent $fixture
+    foreach ($path in @($fixture, "$fixture-other/child")) {
+        $rejected = $false
+        try { Assert-ChildPath -Path $path -Parent $fixture } catch { $rejected = $true }
+        if (!$rejected) { throw "Unsafe path was accepted: $path" }
+    }
+    $protected = Join-Path $fixture 'protected'
+    [void][IO.Directory]::CreateDirectory($protected)
+    $link = Join-Path $fixture 'linked'
+    $type = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
+    New-Item -ItemType $type -Path $link -Target $protected | Out-Null
     $rejected = $false
-    try { Assert-ChildPath -Path $path -Parent $fixture } catch { $rejected = $true }
-    if (!$rejected) { throw "Unsafe path was accepted: $path" }
+    try { Assert-ChildPath -Path (Join-Path $link 'child') -Parent $fixture } catch { $rejected = $true }
+    if (!$rejected) { throw 'Linked output path was accepted.' }
+    Assert-ChildPath -Path (Join-Path $link 'child') -Parent $link
+    Assert-ChildPath -Path (Join-Path $link 'nested/child') -Parent (Join-Path $link 'nested')
+    & (Join-Path $PSScriptRoot 'test-cleanup.ps1')
+    & (Join-Path $PSScriptRoot 'test-publication-scan.ps1')
+    & (Join-Path $PSScriptRoot 'test-release-packaging.ps1')
+    Write-Host "Patcher script syntax and helpers passed ($count scripts; SkipBash=$SkipBash)."
+} finally {
+    Remove-TestFixture -Path $fixture
 }
-$protected = Join-Path $fixture 'protected'
-[void][IO.Directory]::CreateDirectory($protected)
-$link = Join-Path $fixture 'linked'
-$type = if ($IsWindows) { 'Junction' } else { 'SymbolicLink' }
-New-Item -ItemType $type -Path $link -Target $protected | Out-Null
-$rejected = $false
-try { Assert-ChildPath -Path (Join-Path $link 'child') -Parent $fixture } catch { $rejected = $true }
-if (!$rejected) { throw 'Linked output path was accepted.' }
-Assert-ChildPath -Path (Join-Path $link 'child') -Parent $link
-Assert-ChildPath -Path (Join-Path $link 'nested/child') -Parent (Join-Path $link 'nested')
-& (Join-Path $PSScriptRoot 'test-cleanup.ps1')
-& (Join-Path $PSScriptRoot 'test-publication-scan.ps1')
-& (Join-Path $PSScriptRoot 'test-release-packaging.ps1')
-Write-Host "Patcher script syntax and helpers passed ($count scripts; SkipBash=$SkipBash)."

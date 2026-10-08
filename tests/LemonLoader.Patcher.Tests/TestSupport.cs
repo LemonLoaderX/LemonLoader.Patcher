@@ -51,7 +51,7 @@ internal static class TestSupport
         return output.ToArray();
     }
 
-    public static string CreateReleaseTree(string root, string rid = "android-arm64")
+    public static string CreateReleaseTree(string root, string rid = "android-arm64", int manifestFormat = 3)
     {
         var releaseRoot = Path.Combine(root, $"release-{Guid.NewGuid():N}");
         WritePayload(releaseRoot, "lib/arm64-v8a/libmain.so", "loader-main");
@@ -74,19 +74,23 @@ internal static class TestSupport
             JsonSerializer.Serialize(new { formatVersion = 9, runtimeRid = rid }));
         var manifest = new Dictionary<string, object>
         {
-            ["formatVersion"] = 2,
-            ["assetLayoutVersion"] = 9,
-            ["configuration"] = "Release",
-            ["gameAssembliesIncluded"] = false,
+            ["formatVersion"] = manifestFormat,
             ["managedRuntimeVersion"] = version,
-            ["managedRuntimeBackend"] = "coreclr",
             ["managedRuntimeSourceRevision"] = new string('2', 40),
-            ["managedRuntimeEngineFile"] = "libcoreclr.so",
-            ["managedRuntimeEngineSha256"] = GetReleaseFileDigests(releaseRoot)[$"{shared}/libcoreclr.so"].Hash,
             ["runtimeRid"] = rid,
-            ["minimumAndroidApi"] = 26
+            ["minimumAndroidApi"] = 26,
+            ["developmentBuild"] = false
         };
-        if (rid == "android-arm64") manifest["coreClrCryptoDexMode"] = "embedded";
+        if (manifestFormat == 2)
+        {
+            manifest["assetLayoutVersion"] = 9;
+            manifest["configuration"] = "Release";
+            manifest["gameAssembliesIncluded"] = false;
+            manifest["managedRuntimeBackend"] = "coreclr";
+            manifest["managedRuntimeEngineFile"] = "libcoreclr.so";
+            manifest["managedRuntimeEngineSha256"] = GetReleaseFileDigests(releaseRoot)[$"{shared}/libcoreclr.so"].Hash;
+            if (rid == "android-arm64") manifest["coreClrCryptoDexMode"] = "embedded";
+        }
         File.WriteAllText(Path.Combine(releaseRoot, "lemonloader-release.json"), JsonSerializer.Serialize(manifest));
         RefreshReleaseInventory(releaseRoot);
         return releaseRoot;
