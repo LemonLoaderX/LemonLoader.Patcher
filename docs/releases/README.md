@@ -38,6 +38,13 @@ upgrade instructions, download selection, known limitations, or validation scope
 It is an addition, not a replacement for the generated log; omit duplicate titles
 and commit lists. Missing or blank files require no action.
 
+Additions appear verbatim on a Release page, which has no repository-file path
+context. Use absolute GitHub URLs pinned to the release tag or commit for repository
+files and images; relative file paths do not work there. Check destination files and
+heading anchors at that revision, then preview the rendered release body. Generating
+notes does not resolve Markdown links. For an already published release, correct its
+body separately and preserve its existing tag, assets and generated change list.
+
 The generator reads this file from the target commit, ignoring uncommitted
 edits. Existing historical version files remain intact.
 
