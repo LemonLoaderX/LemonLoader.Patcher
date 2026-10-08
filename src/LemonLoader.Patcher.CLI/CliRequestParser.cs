@@ -23,36 +23,29 @@ internal static class CliRequestParser
                  "--interop-output" or "--cpp2il" or "--il2cppinterop-cli")).ToArray() : PatchValueOptions,
             ["--policy"],
             ["--align"]);
-        try
+        return new PatchRequest
         {
-            return new PatchRequest
-            {
-                InputPath = args[0],
-                OutputPath = parsed.Optional("--output"),
-                ReleasePath = parsed.Optional("--release"),
-                RuntimeVariant = parsed.Optional("--runtime"),
-                DeploymentPath = parsed.Optional("--deployment"),
-                DeploymentPolicies = DeploymentPolicyOptions.Create(
-                    parsed.Optional("--profile"),
-                    parsed.Many("--policy")),
-                InteropInputPath = injectionOnly ? parsed.Required("--interop") : parsed.Optional("--interop"),
-                Generation = new[] { "--game-assembly", "--metadata", "--unity-version", "--unity-libraries",
-                    "--interop-output", "--cpp2il", "--il2cppinterop-cli" }.Any(option => parsed.Optional(option) is not null)
-                    ? new InteropRequest
-                    {
-                        GameAssemblyPath = parsed.Optional("--game-assembly"), MetadataPath = parsed.Optional("--metadata"),
-                        UnityVersion = parsed.Optional("--unity-version"), UnityLibrariesPath = parsed.Optional("--unity-libraries"),
-                        OutputPath = parsed.Optional("--interop-output"), Cpp2IlPath = parsed.Optional("--cpp2il"),
-                        Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli")
-                    } : null,
-                PostProcessing = new(parsed.Has("--align"), parsed.Optional("--zipalign"),
-                    ParseSigning(parsed), parsed.Optional("--apksigner"))
-            }.NormalizeAndValidate();
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
-        {
-            throw new CliUsageException(exception.Message, exception);
-        }
+            InputPath = args[0],
+            OutputPath = parsed.Optional("--output"),
+            ReleasePath = parsed.Optional("--release"),
+            RuntimeVariant = parsed.Optional("--runtime"),
+            DeploymentPath = parsed.Optional("--deployment"),
+            DeploymentPolicies = DeploymentPolicyOptions.Create(
+                parsed.Optional("--profile"),
+                parsed.Many("--policy")),
+            InteropInputPath = injectionOnly ? parsed.Required("--interop") : parsed.Optional("--interop"),
+            Generation = new[] { "--game-assembly", "--metadata", "--unity-version", "--unity-libraries",
+                "--interop-output", "--cpp2il", "--il2cppinterop-cli" }.Any(option => parsed.Optional(option) is not null)
+                ? new InteropRequest
+                {
+                    GameAssemblyPath = parsed.Optional("--game-assembly"), MetadataPath = parsed.Optional("--metadata"),
+                    UnityVersion = parsed.Optional("--unity-version"), UnityLibrariesPath = parsed.Optional("--unity-libraries"),
+                    OutputPath = parsed.Optional("--interop-output"), Cpp2IlPath = parsed.Optional("--cpp2il"),
+                    Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli")
+                } : null,
+            PostProcessing = new(parsed.Has("--align"), parsed.Optional("--zipalign"),
+                ParseSigning(parsed), parsed.Optional("--apksigner"))
+        };
     }
 
     public static InteropRequest ParseInteropRequest(string[] args)
@@ -60,18 +53,13 @@ internal static class CliRequestParser
         var hasInput = args.Length > 0 && !args[0].StartsWith('-');
         var parsed = CliOptions.Parse(hasInput ? args[1..] : args,
             ["--output", "--game-assembly", "--metadata", "--unity-version", "--unity-libraries", "--cpp2il", "--il2cppinterop-cli"]);
-        try
+        return new InteropRequest
         {
-            return new InteropRequest
-            {
-                InputPath = hasInput ? args[0] : null, OutputPath = parsed.Required("--output"),
-                GameAssemblyPath = parsed.Optional("--game-assembly"), MetadataPath = parsed.Optional("--metadata"),
-                UnityVersion = parsed.Optional("--unity-version"), UnityLibrariesPath = parsed.Optional("--unity-libraries"),
-                Cpp2IlPath = parsed.Optional("--cpp2il"), Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli")
-            }.NormalizeAndValidate();
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
-        { throw new CliUsageException(exception.Message, exception); }
+            InputPath = hasInput ? args[0] : null, OutputPath = parsed.Required("--output"),
+            GameAssemblyPath = parsed.Optional("--game-assembly"), MetadataPath = parsed.Optional("--metadata"),
+            UnityVersion = parsed.Optional("--unity-version"), UnityLibrariesPath = parsed.Optional("--unity-libraries"),
+            Cpp2IlPath = parsed.Optional("--cpp2il"), Il2CppInteropCliPath = parsed.Optional("--il2cppinterop-cli")
+        };
     }
 
     public static ApkProcessingRequest ParseProcessingRequest(string[] args)
@@ -80,17 +68,12 @@ internal static class CliRequestParser
             throw new CliUsageException("Missing input APK. Run 'LemonLoader.Patcher.CLI process-apk --help'.");
         var parsed = CliOptions.Parse(args[1..],
             ["--output", "--zipalign", "--keystore", "--key-alias", "--apksigner"], switches: ["--align"]);
-        try
+        return new ApkProcessingRequest
         {
-            var request = new ApkProcessingRequest
-            {
-                InputPath = args[0], OutputPath = parsed.Required("--output"),
-                PostProcessing = new(parsed.Has("--align"), parsed.Optional("--zipalign"),
-                    ParseSigning(parsed), parsed.Optional("--apksigner"))
-            };
-            return request.NormalizeAndValidate();
-        }
-        catch (ArgumentException exception) { throw new CliUsageException(exception.Message, exception); }
+            InputPath = args[0], OutputPath = parsed.Required("--output"),
+            PostProcessing = new(parsed.Has("--align"), parsed.Optional("--zipalign"),
+                ParseSigning(parsed), parsed.Optional("--apksigner"))
+        };
     }
 
     public static UnityDependenciesRequest ParseUnityDependenciesRequest(string[] args)

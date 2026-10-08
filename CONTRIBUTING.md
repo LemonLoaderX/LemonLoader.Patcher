@@ -5,6 +5,12 @@ ZIP handling, directory handling, Interop generation, payload assembly, and
 optional post-processing as distinct responsibilities; do not duplicate patch
 behavior in a front end.
 
+CLI parsing constructs requests; Core pipeline constructors normalize and validate
+them once. CLI maps construction errors to usage errors before running the pipeline,
+so execution failures retain their separate exit code. After resolving SDK tools,
+recheck their paths against APK/export destinations without revalidating the whole
+request. Keep the existing input, link and overwrite protections.
+
 Directory injection shares payload validation through an uncompressed temporary
 ZIP, extracted directly into the transaction's staging directory on the target
 volume. Validate every destination before publishing files. APK injection keeps its

@@ -66,6 +66,11 @@ internal static class PublicationTests
                 foreach (var signing in new[] { false, true })
                 {
                     var resolvedTool = Path.Combine(tools, signing ? "apksigner" : "zipalign");
+                    await AssertThrowsAsync<ArgumentException>(() => new ApkPatchPipeline(new()
+                    {
+                        InputPath = apk, OutputPath = resolvedTool,
+                        PostProcessing = new(Align: !signing, Signing: signing ? new(key, "fixture", "fixture") : null)
+                    }).RunAsync());
                     await AssertThrowsAsync<ArgumentException>(() => new ApkProcessingPipeline(new()
                     {
                         InputPath = apk, OutputPath = resolvedTool,

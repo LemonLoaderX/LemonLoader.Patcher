@@ -25,6 +25,13 @@ Core types use the product namespace. PatchRequest composes InteropRequest and
 ApkPostProcessingOptions rather than duplicating their fields and validation.
 Independent processing does not convert its request to an injection request.
 
+Pipeline constructors own full request normalization and validation. CLI parsing
+only constructs requests, and the CLI maps constructor failures before execution;
+it does not classify runtime failures as usage errors. Tool resolution introduces
+new paths, so injection rechecks those paths against the APK and optional Interop
+export destinations. Repeating every request check adds filesystem work without
+strengthening that resolved-tool boundary; path and overwrite checks remain.
+
 Injection consumes ordinary top-level DLLs via --interop. inject requires this
 input and rejects generation options; patch can generate or consume existing
 DLLs. Existing DLLs need no Patcher manifest, Unity version or generation-tool

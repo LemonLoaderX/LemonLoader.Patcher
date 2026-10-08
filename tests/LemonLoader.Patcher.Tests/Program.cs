@@ -199,8 +199,7 @@ static async Task TestRuntimeSelectionAsync()
         File.WriteAllText(input, "fixture");
         var request = CliRequestParser.ParsePatchRequest([input, "--output", Path.Combine(root, "output.apk"), "--runtime", "bionic"]);
         AssertEqual("bionic", request.RuntimeVariant);
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [input, "--output", Path.Combine(root, "output.apk"), "--runtime", "other"]));
+        await AssertCliUsageAsync("patch", input, "--output", Path.Combine(root, "output.apk"), "--runtime", "other");
     }
     finally { Directory.Delete(root, true); }
 }
@@ -1199,6 +1198,15 @@ static Task TestExternalToolResolutionAsync()
     return Task.CompletedTask;
 }
 
+static async Task AssertCliUsageAsync(params string[] args)
+{
+    using var output = new StringWriter();
+    using var error = new StringWriter();
+    AssertEqual(CliApplication.UsageError, await CliApplication.RunAsync(args, output, error));
+    AssertEqual("", output.ToString());
+    AssertTrue(error.ToString().StartsWith("error: ", StringComparison.Ordinal), "Missing CLI usage error.");
+}
+
 static async Task TestCliContractAsync()
 {
     var root = CreateTestRoot();
@@ -1207,22 +1215,17 @@ static async Task TestCliContractAsync()
         var apk = Path.Combine(root, "game.apk");
         var outputApk = Path.Combine(root, "mod.apk");
         File.WriteAllText(apk, "apk");
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", apk]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--unknown", "value"]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            ["--apk", apk, "--output", outputApk]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--mod", "ExampleMod.dll"]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--il2cppinterop-cli", "missing.dll"]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location + ".exe"]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--zipalign", "zipalign"]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [apk, "--output", outputApk, "--align", "--align"]));
+        await AssertCliUsageAsync("patch", apk, "--output", apk);
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--unknown", "value");
+        await AssertCliUsageAsync("patch", "--apk", apk, "--output", outputApk);
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--mod", "ExampleMod.dll");
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--il2cppinterop-cli", "missing.dll");
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--il2cppinterop-cli", typeof(ApkPatchPipeline).Assembly.Location + ".exe");
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--zipalign", "zipalign");
+        await AssertCliUsageAsync("patch", apk, "--output", outputApk, "--align", "--align");
+        await AssertCliUsageAsync("generate-interop", apk, "--output", apk);
+        await AssertCliUsageAsync("generate-interop", apk, "--output", Path.Combine(root, "interop"), "--unity-version", "invalid");
+        await AssertCliUsageAsync("process-apk", apk, "--output", outputApk);
 
         var deployment = Path.Combine(root, "deployment");
         Directory.CreateDirectory(deployment);
@@ -1253,10 +1256,8 @@ static async Task TestCliContractAsync()
         Directory.CreateDirectory(directory);
         var directoryRequest = CliRequestParser.ParsePatchRequest([directory]);
         AssertTrue(directoryRequest.OutputPath is null, "CLI directory mode must be in place.");
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [directory, "--output", Path.Combine(root, "copy")]));
-        AssertThrows<CliUsageException>(() => CliRequestParser.ParsePatchRequest(
-            [directory, "--align"]));
+        await AssertCliUsageAsync("patch", directory, "--output", Path.Combine(root, "copy"));
+        await AssertCliUsageAsync("patch", directory, "--align");
 
         using var output = new StringWriter();
         using var error = new StringWriter();
@@ -1271,6 +1272,12 @@ static async Task TestCliContractAsync()
         AssertTrue(
             !error.ToString().Contains("   at ", StringComparison.Ordinal),
             "CLI errors must not include a stack trace unless --verbose is supplied.");
+        output.GetStringBuilder().Clear();
+        error.GetStringBuilder().Clear();
+        AssertEqual(CliApplication.Failure, await CliApplication.RunAsync(
+            ["patch", apk, "--output", outputApk], output, error));
+        AssertEqual("apk", File.ReadAllText(apk));
+        AssertTrue(!File.Exists(outputApk), "A failed input must not publish an APK.");
     }
     finally
     {

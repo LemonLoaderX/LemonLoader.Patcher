@@ -22,14 +22,11 @@ public sealed class ApkPatchPipeline
         if (request.InputKind == PatchInputKind.Apk)
         {
             postProcessing = ApkPostProcessor.Resolve(request.PostProcessing);
-            (request with
-            {
-                PostProcessing = request.PostProcessing with
-                {
-                    ZipAlignPath = postProcessing.ZipAlignPath,
-                    ApkSignerPath = postProcessing.ApkSignerPath
-                }
-            }).NormalizeAndValidate();
+            RequestPaths.ValidateOutputFile(request.OutputPath!,
+                postProcessing.ZipAlignPath, postProcessing.ApkSignerPath);
+            if (request.Generation?.OutputPath is { } export)
+                RequestPaths.ValidateExport(export,
+                    postProcessing.ZipAlignPath, postProcessing.ApkSignerPath);
             Directory.CreateDirectory(Path.GetDirectoryName(request.OutputPath!)!);
         }
         ValidateGameLayout();

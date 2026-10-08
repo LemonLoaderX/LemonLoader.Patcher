@@ -77,10 +77,16 @@ public static class CliApplication
             await output.WriteLineAsync(injectionOnly ? InjectHelp : PatchHelp);
             return Success;
         }
-        var result = await new ApkPatchPipeline(
+        ApkPatchPipeline pipeline;
+        try
+        {
+            pipeline = new ApkPatchPipeline(
                 CliRequestParser.ParsePatchRequest(args, injectionOnly),
-                progress)
-            .RunAsync(cancellationToken);
+                progress);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
+        { throw new CliUsageException(exception.Message, exception); }
+        var result = await pipeline.RunAsync(cancellationToken);
         await output.WriteLineAsync($"output: {result.OutputPath}");
         if (result.Sha256 is not null)
             await output.WriteLineAsync($"sha256: {result.Sha256}");
@@ -93,7 +99,11 @@ public static class CliApplication
         IProgress<PatcherMessage> progress, CancellationToken cancellationToken)
     {
         if (IsHelpRequest(args)) { await output.WriteLineAsync(InteropHelp); return Success; }
-        var result = await new InteropPipeline(CliRequestParser.ParseInteropRequest(args), progress).RunAsync(cancellationToken);
+        InteropPipeline pipeline;
+        try { pipeline = new InteropPipeline(CliRequestParser.ParseInteropRequest(args), progress); }
+        catch (Exception exception) when (exception is ArgumentException or InvalidDataException)
+        { throw new CliUsageException(exception.Message, exception); }
+        var result = await pipeline.RunAsync(cancellationToken);
         await output.WriteLineAsync($"output: {result.OutputPath}");
         await output.WriteLineAsync($"unity-version: {result.UnityVersion}");
         await output.WriteLineAsync($"assemblies: {result.AssemblyCount}");
@@ -104,7 +114,10 @@ public static class CliApplication
         IProgress<PatcherMessage> progress, CancellationToken cancellationToken)
     {
         if (IsHelpRequest(args)) { await output.WriteLineAsync(ProcessingHelp); return Success; }
-        var result = await new ApkProcessingPipeline(CliRequestParser.ParseProcessingRequest(args), progress).RunAsync(cancellationToken);
+        ApkProcessingPipeline pipeline;
+        try { pipeline = new ApkProcessingPipeline(CliRequestParser.ParseProcessingRequest(args), progress); }
+        catch (ArgumentException exception) { throw new CliUsageException(exception.Message, exception); }
+        var result = await pipeline.RunAsync(cancellationToken);
         await output.WriteLineAsync($"output: {result.OutputPath}");
         await output.WriteLineAsync($"sha256: {result.Sha256}");
         return Success;
