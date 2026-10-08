@@ -55,7 +55,7 @@ Injection needs no Unity version, reference libraries, Cpp2IL or generator.
 DLLs must match the exact game. No Patcher manifest/game identity is required.
 inject rejects generation options; patch --interop uses the same injection path.
 
-Current Patcher source accepts Release manifest formats 2 and 3 with installed
+Patcher 2.1.0 and later accept Release manifest formats 2 and 3 with installed
 layout 9. Format 3 removes redundant build/layout declarations; the payload,
 runtime RID and verified file inventory supply those facts. Published Patcher
 2.0.0 accepts format 2 only. Use a Patcher supporting format 3 for newly staged
