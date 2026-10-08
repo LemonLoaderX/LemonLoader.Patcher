@@ -55,6 +55,10 @@ README presents file stages and makes Patcher optional; WORKFLOW documents actua
 generator commands, installed mappings, minimal JSON and SDK operations. Loader
 owns installed semantics. Documentation is procedure/contract, never local test
 state. No new repositories, plugin mechanism or intermediate package format exist.
+AGENTS.md provides the short source/command entry point; CONTRIBUTING.md owns
+development, style, test selection and output cleanup rules. These documents remain
+local to Patcher so its independent checkout needs no parent handbook. Task status
+and per-run evidence remain in ignored output rather than another public guide.
 
 ## Alternatives considered
 
